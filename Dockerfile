@@ -1,32 +1,31 @@
-# Etapa 1: Compilación del proyecto
-FROM eclipse-temurin:21-jdk-alpine AS build
+# Etapa 1: Compilación usando OpenJDK 24
+FROM eclipse-temurin:24-jdk-alpine AS build
 WORKDIR /app
 
-# Copiar archivos de configuración de Gradle
+# Copiar wrapper y archivos de configuración de Gradle
 COPY gradlew .
 COPY gradle gradle
 COPY build.gradle.kts .
 COPY settings.gradle.kts .
 
-# Dar permisos de ejecución al wrapper
+# Dar permisos de ejecución
 RUN chmod +x ./gradlew
 
-# Descargar dependencias
-RUN ./gradlew dependencies --no-daemon
-
-# Copiar el código fuente y compilar excluyendo tests
+# Copiar el código fuente completo
 COPY src src
+
+# Compilar empaquetando el JAR final (excluyendo tests para acelerar el deploy)
 RUN ./gradlew bootJar --no-daemon -x test
 
-# Etapa 2: Imagen final ligera para ejecución
-FROM eclipse-temurin:21-jre-alpine
+# Etapa 2: Imagen final para ejecución en producción
+FROM eclipse-temurin:24-jre-alpine
 WORKDIR /app
 
-# Copiar el JAR generado desde la etapa de compilación
+# Copiar el archivo JAR generado
 COPY --from=build /app/build/libs/*.jar app.jar
 
-# Exponer el puerto por defecto de Spring Boot
+# Exponer el puerto
 EXPOSE 8080
 
-# Comando de arranque adaptado a la variable PORT de Render
+# Iniciar la aplicación enlazando la variable dinámica $PORT de Render
 ENTRYPOINT ["sh", "-c", "java -Dserver.port=${PORT:-8080} -jar app.jar"]
