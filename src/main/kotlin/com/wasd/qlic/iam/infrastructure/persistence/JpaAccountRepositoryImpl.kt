@@ -22,6 +22,9 @@ class JpaAccountRepositoryImpl(
             )
         )
 
+    override fun findById(id: UUID): Account? =
+        jpaRepository.findById(id).orElse(null)?.let { toDomain(it) }
+
     override fun findByOwnerId(ownerId: UUID): Account? =
         jpaRepository.findFirstByOwnerId(ownerId)?.let { toDomain(it) }
 

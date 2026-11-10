@@ -3,6 +3,7 @@ package com.wasd.qlic.iam.infrastructure.tokens
 import com.wasd.qlic.iam.domain.model.aggregates.Account
 import com.wasd.qlic.iam.domain.model.entities.Subscriber
 import com.wasd.qlic.iam.domain.model.valueobjects.AccessToken
+import com.wasd.qlic.iam.domain.model.valueobjects.PermissionLevel
 import com.wasd.qlic.iam.domain.services.TokenProvider
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm
@@ -24,7 +25,7 @@ class JwtTokenProvider(
     @Value("\${qlic.security.jwt.expiration-minutes}") private val expirationMinutes: Long
 ) : TokenProvider {
 
-    override fun issue(subscriber: Subscriber, account: Account): AccessToken {
+    override fun issue(subscriber: Subscriber, account: Account, permission: PermissionLevel): AccessToken {
         val issuedAt = Instant.now()
         val expiresAt = issuedAt.plus(Duration.ofMinutes(expirationMinutes))
         val claims = JwtClaimsSet.builder()
@@ -34,6 +35,8 @@ class JwtTokenProvider(
             .subject(subscriber.id.toString())
             .claim("email", subscriber.email.value)
             .claim("accountId", account.id.toString())
+            .claim("permission", permission.name)
+            .claim("scope", permission.scopes())
             .build()
         val header = JwsHeader.with(MacAlgorithm.HS256).build()
         val token = jwtEncoder.encode(JwtEncoderParameters.from(header, claims)).tokenValue

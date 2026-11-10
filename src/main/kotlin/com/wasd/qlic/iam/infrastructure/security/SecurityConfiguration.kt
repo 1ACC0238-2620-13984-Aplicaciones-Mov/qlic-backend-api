@@ -27,13 +27,16 @@ import javax.crypto.spec.SecretKeySpec
 
 /**
  * Configures the security filter chain and the protected routes of the API.
- * Authentication endpoints and the OpenAPI documentation are public; every other
- * request requires a valid Bearer token (TS01 - Scenario 3: 401 without token).
+ * Authentication endpoints, the terms of service and the OpenAPI documentation are public; every
+ * other request requires a valid Bearer token (TS01 - Scenario 3: 401 without token).
+ * Modification requests over the account resources require the account:write scope, which is not
+ * granted to VIEWER users (US08 - Scenario 2: 403).
  */
 @Configuration
 @EnableWebSecurity
 class SecurityConfiguration(
-    @Value("\${qlic.security.jwt.secret}") private val jwtSecret: String
+    @Value("\${qlic.security.jwt.secret}") private val jwtSecret: String,
+    private val accessDeniedHandler: ProblemDetailAccessDeniedHandler
 ) {
 
     @Bean
@@ -47,9 +50,16 @@ class SecurityConfiguration(
                 auth
                     .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                     .requestMatchers(*PUBLIC_ENDPOINTS).permitAll()
-                    .anyRequest().authenticated()
+                WRITE_METHODS.forEach { method ->
+                    auth.requestMatchers(method, *WRITE_PROTECTED_ENDPOINTS).hasAuthority(WRITE_AUTHORITY)
+                }
+                auth.anyRequest().authenticated()
             }
-            .oauth2ResourceServer { it.jwt(Customizer.withDefaults()) }
+            .exceptionHandling { it.accessDeniedHandler(accessDeniedHandler) }
+            .oauth2ResourceServer {
+                it.jwt(Customizer.withDefaults())
+                it.accessDeniedHandler(accessDeniedHandler)
+            }
         return http.build()
     }
 
@@ -89,11 +99,26 @@ class SecurityConfiguration(
     companion object {
         private val PUBLIC_ENDPOINTS = arrayOf(
             "/api/v1/authentication/**",
+            "/api/v1/terms-of-service/**",
             "/v3/api-docs/**",
             "/swagger-ui/**",
             "/swagger-ui.html",
             "/h2-console/**",
             "/error"
         )
+
+        /** Resources of the account whose configuration a VIEWER cannot modify (US08 - Scenario 2). */
+        private val WRITE_PROTECTED_ENDPOINTS = arrayOf(
+            "/api/v1/devices/**",
+            "/api/v1/alerts/**",
+            "/api/v1/consumption/**",
+            "/api/v1/consumption-readings/**",
+            "/api/v1/incidents/**",
+            "/api/v1/subscriptions/**"
+        )
+
+        private val WRITE_METHODS = listOf(HttpMethod.POST, HttpMethod.PUT, HttpMethod.PATCH, HttpMethod.DELETE)
+
+        private const val WRITE_AUTHORITY = "SCOPE_account:write"
     }
 }

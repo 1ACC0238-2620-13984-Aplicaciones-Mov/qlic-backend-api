@@ -5,6 +5,7 @@ import com.wasd.qlic.iam.domain.model.valueobjects.EmailAddress
 import com.wasd.qlic.iam.domain.model.valueobjects.PasswordHash
 import com.wasd.qlic.iam.domain.repositories.SubscriberRepository
 import org.springframework.stereotype.Component
+import java.util.UUID
 
 @Component
 class JpaSubscriberRepositoryImpl(
@@ -25,6 +26,9 @@ class JpaSubscriberRepositoryImpl(
                 )
             )
         )
+
+    override fun findById(id: UUID): Subscriber? =
+        jpaRepository.findById(id).orElse(null)?.let { toDomain(it) }
 
     override fun findByEmail(email: EmailAddress): Subscriber? =
         jpaRepository.findByEmail(email.value)?.let { toDomain(it) }
