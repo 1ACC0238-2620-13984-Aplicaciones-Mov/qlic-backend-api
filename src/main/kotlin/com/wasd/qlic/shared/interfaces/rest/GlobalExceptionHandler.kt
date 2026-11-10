@@ -2,7 +2,10 @@ package com.wasd.qlic.shared.interfaces.rest
 
 import com.wasd.qlic.iam.domain.exceptions.EmailAlreadyRegisteredException
 import com.wasd.qlic.iam.domain.exceptions.InvalidCredentialsException
+import com.wasd.qlic.shared.domain.exceptions.BusinessConflictException
 import com.wasd.qlic.shared.domain.exceptions.DomainException
+import com.wasd.qlic.shared.domain.exceptions.OperationNotPermittedException
+import com.wasd.qlic.shared.domain.exceptions.ResourceNotFoundException
 import org.springframework.context.MessageSource
 import org.springframework.context.i18n.LocaleContextHolder
 import org.springframework.http.HttpStatus
@@ -40,6 +43,9 @@ class GlobalExceptionHandler(private val messageSource: MessageSource) {
     private fun statusOf(exception: DomainException): HttpStatus = when (exception) {
         is EmailAlreadyRegisteredException -> HttpStatus.CONFLICT
         is InvalidCredentialsException -> HttpStatus.UNAUTHORIZED
+        is ResourceNotFoundException -> HttpStatus.NOT_FOUND
+        is OperationNotPermittedException -> HttpStatus.FORBIDDEN
+        is BusinessConflictException -> HttpStatus.CONFLICT
         else -> HttpStatus.BAD_REQUEST
     }
 
