@@ -7,81 +7,62 @@ import com.wasd.qlic.monitoring.application.queries.GetDevicesByAccountQuery
 import com.wasd.qlic.monitoring.interfaces.rest.resources.AssignWaterPointRequest
 import com.wasd.qlic.monitoring.interfaces.rest.resources.IoTDeviceResource
 import com.wasd.qlic.monitoring.interfaces.rest.resources.RegisterDeviceRequest
+import com.wasd.qlic.monitoring.interfaces.rest.resources.toResource
+import com.wasd.qlic.shared.interfaces.rest.security.accountId
+import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.Parameter
+import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.security.core.annotation.AuthenticationPrincipal
+import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.web.bind.annotation.*
 import java.util.UUID
 
+/** Device Monitoring endpoints. Every operation works on the account of the access token. */
 @RestController
 @RequestMapping("/api/v1/devices")
+@Tag(name = "Devices", description = "IoT devices of the account of the session")
 class DeviceController(
     private val deviceCommandHandler: DeviceCommandHandler
 ) {
 
-    // US10: Registrar dispositivo IoT mediante QR[cite: 5]
     @PostMapping
-    fun registerDevice(@RequestBody request: RegisterDeviceRequest): ResponseEntity<IoTDeviceResource> {
-        val command = RegisterDeviceCommand(
-            qrCodePayload = request.qrCodePayload,
-            serialNumber = request.serialNumber,
-            model = request.model,
-            accountId = request.accountId
-        )
-        val device = deviceCommandHandler.handleRegister(command)
-        return ResponseEntity.status(HttpStatus.CREATED).body(
-            IoTDeviceResource(
-                id = device.id,
-                serialNumber = device.serialNumber,
-                model = device.model,
-                accountId = device.accountId,
-                waterPointId = device.waterPointId,
-                status = device.status,
-                batteryPercentage = device.batteryPercentage,
-                lastSyncAt = device.lastSyncAt
+    @Operation(summary = "Register an IoT device from its QR code (US10)")
+    fun registerDevice(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
+        @RequestBody request: RegisterDeviceRequest
+    ): ResponseEntity<IoTDeviceResource> {
+        val device = deviceCommandHandler.handleRegister(
+            RegisterDeviceCommand(
+                qrCodePayload = request.qrCodePayload,
+                serialNumber = request.serialNumber,
+                model = request.model,
+                accountId = jwt.accountId()
             )
         )
+        return ResponseEntity.status(HttpStatus.CREATED).body(device.toResource())
     }
 
-    // US11: Asignar un dispositivo a un Water Point[cite: 5]
     @PatchMapping("/{id}/water-point")
+    @Operation(summary = "Assign a device to a Water Point (US11)")
     fun assignWaterPoint(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @PathVariable id: UUID,
         @RequestBody request: AssignWaterPointRequest
     ): ResponseEntity<IoTDeviceResource> {
-        val command = AssignWaterPointCommand(deviceId = id, waterPointId = request.waterPointId)
-        val updated = deviceCommandHandler.handleAssignWaterPoint(command)
-            ?: return ResponseEntity.notFound().build()
-
-        return ResponseEntity.ok(
-            IoTDeviceResource(
-                id = updated.id,
-                serialNumber = updated.serialNumber,
-                model = updated.model,
-                accountId = updated.accountId,
-                waterPointId = updated.waterPointId,
-                status = updated.status,
-                batteryPercentage = updated.batteryPercentage,
-                lastSyncAt = updated.lastSyncAt
-            )
+        val updated = deviceCommandHandler.handleAssignWaterPoint(
+            AssignWaterPointCommand(deviceId = id, waterPointId = request.waterPointId, accountId = jwt.accountId())
         )
+        return ResponseEntity.ok(updated.toResource())
     }
 
-    // US12: Consultar estado de los dispositivos registrados[cite: 5]
     @GetMapping
-    fun getDevicesByAccount(@RequestParam accountId: UUID): ResponseEntity<List<IoTDeviceResource>> {
-        val query = GetDevicesByAccountQuery(accountId)
-        val devices = deviceCommandHandler.handleGetByAccount(query).map {
-            IoTDeviceResource(
-                id = it.id,
-                serialNumber = it.serialNumber,
-                model = it.model,
-                accountId = it.accountId,
-                waterPointId = it.waterPointId,
-                status = it.status,
-                batteryPercentage = it.batteryPercentage,
-                lastSyncAt = it.lastSyncAt
-            )
-        }
-        return ResponseEntity.ok(devices)
-    }
+    @Operation(summary = "List the devices of the account and their status (US12)")
+    fun getDevicesByAccount(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt
+    ): ResponseEntity<List<IoTDeviceResource>> =
+        ResponseEntity.ok(
+            deviceCommandHandler.handleGetByAccount(GetDevicesByAccountQuery(jwt.accountId())).map { it.toResource() }
+        )
 }

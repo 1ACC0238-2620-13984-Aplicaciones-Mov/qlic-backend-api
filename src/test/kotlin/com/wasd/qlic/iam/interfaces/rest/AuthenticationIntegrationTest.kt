@@ -83,7 +83,7 @@ class AuthenticationIntegrationTest {
     @Test
     @DisplayName("TS01 - Scenario 3: a protected resource without token returns 401")
     fun protectedResourceWithoutTokenReturnsUnauthorized() {
-        mockMvc.perform(get("/api/v1/devices").param("accountId", "c41d8e7a-2f6b-4a9d-8c3e-5b1a7f9d2e61"))
+        mockMvc.perform(get("/api/v1/devices"))
             .andExpect(status().isUnauthorized)
     }
 

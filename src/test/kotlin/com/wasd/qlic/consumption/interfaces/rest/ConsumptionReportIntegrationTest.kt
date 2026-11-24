@@ -56,8 +56,10 @@ class ConsumptionReportIntegrationTest {
         val deviceId = field(
             mockMvc.perform(
                 post("/api/v1/devices").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
-                    .content("""{"qrCodePayload":"QLIC-QR-OFF-01","serialNumber":"QLIC-OFF-01","model":"QlicSense","accountId":"$accountId"}""")
-            ).andExpect(status().isCreated).andReturn().response.contentAsString,
+                    .content("""{"qrCodePayload":"QLIC-QR-OFF-01","serialNumber":"QLIC-OFF-01","model":"QlicSense"}""")
+            ).andExpect(status().isCreated)
+                .andExpect(jsonPath("$.accountId").value(accountId))
+                .andReturn().response.contentAsString,
             "id"
         )
         mockMvc.perform(

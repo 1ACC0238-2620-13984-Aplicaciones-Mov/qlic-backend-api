@@ -1,6 +1,8 @@
 package com.wasd.qlic.alerting.application.handlers
 
 import com.wasd.qlic.alerting.application.commands.*
+import com.wasd.qlic.alerting.domain.exceptions.AlertNotFoundException
+import com.wasd.qlic.alerting.domain.exceptions.AlertRecipientNotFoundException
 import com.wasd.qlic.alerting.domain.model.*
 import com.wasd.qlic.alerting.domain.repositories.*
 import org.springframework.stereotype.Service
@@ -83,9 +85,10 @@ class AlertManagementCommandHandler(
     fun getRecipientsByAccount(accountId: UUID): List<AuthorizedAlertRecipient> =
         recipientRepository.findAllByAccountId(accountId)
 
-    fun toggleRecipient(recipientId: UUID, enabled: Boolean): AuthorizedAlertRecipient {
+    fun toggleRecipient(recipientId: UUID, accountId: UUID, enabled: Boolean): AuthorizedAlertRecipient {
         val recipient = recipientRepository.findById(recipientId)
-            ?: throw IllegalArgumentException("Usuario autorizado no encontrado: $recipientId")
+            ?.takeIf { it.accountId == accountId }
+            ?: throw AlertRecipientNotFoundException()
         recipient.enabled = enabled
         return recipientRepository.save(recipient)
     }
@@ -100,7 +103,7 @@ class AlertManagementCommandHandler(
     fun acknowledgeAlert(command: AcknowledgeAlertCommand): LeakAlert {
         val alert = leakAlertRepository.findById(command.alertId)
             ?.takeIf { it.accountId == command.accountId }
-            ?: throw IllegalArgumentException("Alerta no encontrada para la cuenta indicada")
+            ?: throw AlertNotFoundException()
 
         alert.acknowledge(command.actionTaken)
         return leakAlertRepository.save(alert)
