@@ -5,288 +5,223 @@ import com.wasd.qlic.alerting.application.handlers.AlertManagementCommandHandler
 import com.wasd.qlic.alerting.application.handlers.EvaluateConsumptionReadingCommandHandler
 import com.wasd.qlic.alerting.application.handlers.GetAlertsByAccountQueryHandler
 import com.wasd.qlic.alerting.application.queries.GetAlertsByAccountQuery
+import com.wasd.qlic.alerting.domain.exceptions.AlertNotFoundException
+import com.wasd.qlic.alerting.domain.model.AuthorizedAlertRecipient
+import com.wasd.qlic.alerting.domain.model.ConsumptionThreshold
+import com.wasd.qlic.alerting.domain.model.LeakAlert
+import com.wasd.qlic.alerting.domain.model.NotificationPreference
 import com.wasd.qlic.alerting.interfaces.rest.resources.*
+import com.wasd.qlic.shared.interfaces.rest.security.accountId
+import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.Parameter
+import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.security.core.annotation.AuthenticationPrincipal
+import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.web.bind.annotation.*
 import java.math.BigDecimal
 import java.util.UUID
 
+/** Alerting endpoints. Every operation works on the account of the access token. */
 @RestController
 @RequestMapping("/api/v1/alerts")
+@Tag(name = "Alerts", description = "Leak alerts, thresholds, notification preferences and recipients")
 class LeakAlertController(
     private val evaluateHandler: EvaluateConsumptionReadingCommandHandler,
     private val getAlertsHandler: GetAlertsByAccountQueryHandler,
     private val managementHandler: AlertManagementCommandHandler
 ) {
 
-    // US15: Ingesta y evaluación de lecturas de consumo (integrado con US17, US18, US19 y US20)
     @PostMapping("/evaluations")
-    fun evaluateReading(@RequestBody request: EvaluateReadingRequest): ResponseEntity<Any> {
+    @Operation(summary = "Evaluate a consumption reading and raise a leak alert when needed (US15, US17-US19)")
+    fun evaluateReading(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
+        @RequestBody request: EvaluateReadingRequest
+    ): ResponseEntity<LeakAlertResource> {
+        val accountId = jwt.accountId()
         val effectiveLimit = request.thresholdLimit ?: managementHandler
-            .getThresholdsByAccount(request.accountId)
+            .getThresholdsByAccount(accountId)
             .find { it.waterPointId == request.waterPointId }
             ?.effectiveLimit()
-        ?: BigDecimal("125.00")
+        ?: DEFAULT_LIMIT_LITERS_PER_HOUR
 
-        val command = EvaluateConsumptionReadingCommand(
-            accountId = request.accountId,
-            waterPointId = request.waterPointId,
-            currentFlowLitersPerHour = request.currentFlowLitersPerHour,
-            thresholdLimit = effectiveLimit,
-            isSustained = request.isSustained
-        )
-
-        val result = evaluateHandler.handle(command)
-        return if (result != null) {
-            val preference = managementHandler.getNotificationPreference(request.accountId)
-            val pushDispatched = preference.shouldSendPush(result.urgency)
-            val notifiedUsers = if (pushDispatched) {
-                managementHandler.dispatchPushToAuthorizedUsers(request.accountId)
-            } else {
-                emptyList()
-            }
-
-            val resource = LeakAlertResource(
-                id = result.id,
-                accountId = result.accountId,
-                waterPointId = result.waterPointId,
-                state = result.state,
-                urgency = result.urgency,
-                detectedAt = result.detectedAt,
-                estimatedVolumeLiters = result.estimatedVolumeLiters,
-                estimatedCostSoles = result.estimatedCostSoles,
-                recommendedAction = result.recommendedAction,
-                acknowledgedAction = result.acknowledgedAction,
-                previousAlertId = result.previousAlertId,
-                pushDispatched = pushDispatched,
-                notifiedRecipientsCount = notifiedUsers.size
+        val result = evaluateHandler.handle(
+            EvaluateConsumptionReadingCommand(
+                accountId = accountId,
+                waterPointId = request.waterPointId,
+                currentFlowLitersPerHour = request.currentFlowLitersPerHour,
+                thresholdLimit = effectiveLimit,
+                isSustained = request.isSustained
             )
-            ResponseEntity.status(HttpStatus.CREATED).body(resource)
-        } else {
-            ResponseEntity.noContent().build()
-        }
+        ) ?: return ResponseEntity.noContent().build()
+
+        val pushDispatched = managementHandler.getNotificationPreference(accountId).shouldSendPush(result.urgency)
+        val notifiedUsers = if (pushDispatched) managementHandler.dispatchPushToAuthorizedUsers(accountId) else emptyList()
+        return ResponseEntity.status(HttpStatus.CREATED)
+            .body(result.toResource(pushDispatched = pushDispatched, notifiedRecipientsCount = notifiedUsers.size))
     }
 
-    // US16: Consulta de alertas por cuenta
     @GetMapping
-    fun getAlertsByAccount(@RequestParam accountId: UUID): ResponseEntity<List<LeakAlertResource>> {
-        val query = GetAlertsByAccountQuery(accountId)
-        val alerts = getAlertsHandler.handle(query).map {
-            LeakAlertResource(
-                id = it.id,
-                accountId = it.accountId,
-                waterPointId = it.waterPointId,
-                state = it.state,
-                urgency = it.urgency,
-                detectedAt = it.detectedAt,
-                estimatedVolumeLiters = it.estimatedVolumeLiters,
-                estimatedCostSoles = it.estimatedCostSoles,
-                recommendedAction = it.recommendedAction,
-                acknowledgedAction = it.acknowledgedAction,
-                previousAlertId = it.previousAlertId
-            )
-        }
-        return ResponseEntity.ok(alerts)
-    }
+    @Operation(summary = "List the alerts of the account (US16)")
+    fun getAlertsByAccount(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt
+    ): ResponseEntity<List<LeakAlertResource>> =
+        ResponseEntity.ok(getAlertsHandler.handle(GetAlertsByAccountQuery(jwt.accountId())).map { it.toResource() })
 
-    // US16 (Alert Detail): Consulta del detalle de una alerta específica
     @GetMapping("/{alertId}")
+    @Operation(summary = "Get the detail of an alert of the account (US16)")
     fun getAlertDetail(
-        @PathVariable alertId: UUID,
-        @RequestParam accountId: UUID
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
+        @PathVariable alertId: UUID
     ): ResponseEntity<LeakAlertResource> {
-        val alert = managementHandler.getAlertDetail(alertId, accountId)
-            ?: return ResponseEntity.notFound().build()
-
-        return ResponseEntity.ok(
-            LeakAlertResource(
-                id = alert.id,
-                accountId = alert.accountId,
-                waterPointId = alert.waterPointId,
-                state = alert.state,
-                urgency = alert.urgency,
-                detectedAt = alert.detectedAt,
-                estimatedVolumeLiters = alert.estimatedVolumeLiters,
-                estimatedCostSoles = alert.estimatedCostSoles,
-                recommendedAction = alert.recommendedAction,
-                acknowledgedAction = alert.acknowledgedAction,
-                previousAlertId = alert.previousAlertId
-            )
-        )
+        val alert = managementHandler.getAlertDetail(alertId, jwt.accountId()) ?: throw AlertNotFoundException()
+        return ResponseEntity.ok(alert.toResource())
     }
 
-    // US17: Configurar umbral de consumo (propio o automático)
     @PutMapping("/thresholds")
-    fun configureThreshold(@RequestBody req: ConfigureThresholdRequest): ResponseEntity<ConsumptionThresholdResource> {
+    @Operation(summary = "Configure the consumption threshold of a Water Point (US17)")
+    fun configureThreshold(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
+        @RequestBody req: ConfigureThresholdRequest
+    ): ResponseEntity<ConsumptionThresholdResource> {
         val saved = managementHandler.configureThreshold(
             ConfigureThresholdCommand(
-                accountId = req.accountId,
+                accountId = jwt.accountId(),
                 waterPointId = req.waterPointId,
                 period = req.period,
                 customLimitLitersPerHour = req.customLimitLitersPerHour,
                 baselineLitersPerHour = req.baselineLitersPerHour
             )
         )
-        return ResponseEntity.ok(
-            ConsumptionThresholdResource(
-                id = saved.id,
-                accountId = saved.accountId,
-                waterPointId = saved.waterPointId,
-                period = saved.period,
-                customLimitLitersPerHour = saved.customLimitLitersPerHour,
-                baselineLitersPerHour = saved.baselineLitersPerHour,
-                effectiveLimitLitersPerHour = saved.effectiveLimit(),
-                source = saved.source,
-                updatedAt = saved.updatedAt
-            )
-        )
+        return ResponseEntity.ok(saved.toResource())
     }
 
     @GetMapping("/thresholds")
-    fun getThresholds(@RequestParam accountId: UUID): ResponseEntity<List<ConsumptionThresholdResource>> {
-        val list = managementHandler.getThresholdsByAccount(accountId).map {
-            ConsumptionThresholdResource(
-                id = it.id,
-                accountId = it.accountId,
-                waterPointId = it.waterPointId,
-                period = it.period,
-                customLimitLitersPerHour = it.customLimitLitersPerHour,
-                baselineLitersPerHour = it.baselineLitersPerHour,
-                effectiveLimitLitersPerHour = it.effectiveLimit(),
-                source = it.source,
-                updatedAt = it.updatedAt
-            )
-        }
-        return ResponseEntity.ok(list)
-    }
+    @Operation(summary = "List the consumption thresholds of the account (US17)")
+    fun getThresholds(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt
+    ): ResponseEntity<List<ConsumptionThresholdResource>> =
+        ResponseEntity.ok(managementHandler.getThresholdsByAccount(jwt.accountId()).map { it.toResource() })
 
-    // US18: Configurar preferencias y frecuencia de notificaciones
     @PutMapping("/preferences")
+    @Operation(summary = "Configure the notification frequency and minimum urgency (US18)")
     fun configurePreferences(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @RequestBody req: ConfigureNotificationPreferenceRequest
     ): ResponseEntity<NotificationPreferenceResource> {
         val saved = managementHandler.configureNotificationPreference(
             ConfigureNotificationPreferenceCommand(
-                accountId = req.accountId,
+                accountId = jwt.accountId(),
                 groupingWindowMinutes = req.groupingWindowMinutes,
                 minimumUrgency = req.minimumUrgency
             )
         )
-        return ResponseEntity.ok(
-            NotificationPreferenceResource(
-                id = saved.id,
-                accountId = saved.accountId,
-                groupingWindowMinutes = saved.groupingWindowMinutes,
-                minimumUrgency = saved.minimumUrgency,
-                updatedAt = saved.updatedAt
-            )
-        )
+        return ResponseEntity.ok(saved.toResource())
     }
 
     @GetMapping("/preferences")
-    fun getPreferences(@RequestParam accountId: UUID): ResponseEntity<NotificationPreferenceResource> {
-        val pref = managementHandler.getNotificationPreference(accountId)
-        return ResponseEntity.ok(
-            NotificationPreferenceResource(
-                id = pref.id,
-                accountId = pref.accountId,
-                groupingWindowMinutes = pref.groupingWindowMinutes,
-                minimumUrgency = pref.minimumUrgency,
-                updatedAt = pref.updatedAt
-            )
-        )
-    }
+    @Operation(summary = "Get the notification preferences of the account (US18)")
+    fun getPreferences(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt
+    ): ResponseEntity<NotificationPreferenceResource> =
+        ResponseEntity.ok(managementHandler.getNotificationPreference(jwt.accountId()).toResource())
 
-    // US19: Registrar, consultar y habilitar/deshabilitar usuarios autorizados para alertas
     @PostMapping("/recipients")
+    @Operation(summary = "Add a user who receives the alerts of the account (US19)")
     fun addAuthorizedRecipient(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @RequestBody req: AddAuthorizedRecipientRequest
     ): ResponseEntity<AuthorizedRecipientResource> {
         val saved = managementHandler.addAuthorizedRecipient(
             AddAuthorizedRecipientCommand(
-                accountId = req.accountId,
+                accountId = jwt.accountId(),
                 fullName = req.fullName,
                 email = req.email,
                 devicePushToken = req.devicePushToken,
                 enabled = req.enabled
             )
         )
-        return ResponseEntity.status(HttpStatus.CREATED).body(
-            AuthorizedRecipientResource(
-                id = saved.id,
-                accountId = saved.accountId,
-                fullName = saved.fullName,
-                email = saved.email,
-                devicePushToken = saved.devicePushToken,
-                enabled = saved.enabled,
-                lastNotifiedAt = saved.lastNotifiedAt
-            )
-        )
+        return ResponseEntity.status(HttpStatus.CREATED).body(saved.toResource())
     }
 
     @GetMapping("/recipients")
-    fun getAuthorizedRecipients(@RequestParam accountId: UUID): ResponseEntity<List<AuthorizedRecipientResource>> {
-        val list = managementHandler.getRecipientsByAccount(accountId).map {
-            AuthorizedRecipientResource(
-                id = it.id,
-                accountId = it.accountId,
-                fullName = it.fullName,
-                email = it.email,
-                devicePushToken = it.devicePushToken,
-                enabled = it.enabled,
-                lastNotifiedAt = it.lastNotifiedAt
-            )
-        }
-        return ResponseEntity.ok(list)
-    }
+    @Operation(summary = "List the users who receive the alerts of the account (US19)")
+    fun getAuthorizedRecipients(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt
+    ): ResponseEntity<List<AuthorizedRecipientResource>> =
+        ResponseEntity.ok(managementHandler.getRecipientsByAccount(jwt.accountId()).map { it.toResource() })
 
     @PatchMapping("/recipients/{recipientId}/toggle")
+    @Operation(summary = "Enable or disable an alert recipient of the account (US19)")
     fun toggleAuthorizedRecipient(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @PathVariable recipientId: UUID,
         @RequestBody req: ToggleAuthorizedRecipientRequest
-    ): ResponseEntity<AuthorizedRecipientResource> {
-        val updated = managementHandler.toggleRecipient(recipientId, req.enabled)
-        return ResponseEntity.ok(
-            AuthorizedRecipientResource(
-                id = updated.id,
-                accountId = updated.accountId,
-                fullName = updated.fullName,
-                email = updated.email,
-                devicePushToken = updated.devicePushToken,
-                enabled = updated.enabled,
-                lastNotifiedAt = updated.lastNotifiedAt
-            )
-        )
-    }
+    ): ResponseEntity<AuthorizedRecipientResource> =
+        ResponseEntity.ok(managementHandler.toggleRecipient(recipientId, jwt.accountId(), req.enabled).toResource())
 
-    // US20: Confirmar la atención de una alerta activa
     @PatchMapping("/{alertId}/acknowledge")
+    @Operation(summary = "Confirm that an alert of the account was attended (US20)")
     fun acknowledgeAlert(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @PathVariable alertId: UUID,
         @RequestBody req: AcknowledgeAlertRequest
     ): ResponseEntity<LeakAlertResource> {
         val updated = managementHandler.acknowledgeAlert(
-            AcknowledgeAlertCommand(
-                alertId = alertId,
-                accountId = req.accountId,
-                actionTaken = req.actionTaken
-            )
+            AcknowledgeAlertCommand(alertId = alertId, accountId = jwt.accountId(), actionTaken = req.actionTaken)
         )
-        return ResponseEntity.ok(
-            LeakAlertResource(
-                id = updated.id,
-                accountId = updated.accountId,
-                waterPointId = updated.waterPointId,
-                state = updated.state,
-                urgency = updated.urgency,
-                detectedAt = updated.detectedAt,
-                estimatedVolumeLiters = updated.estimatedVolumeLiters,
-                estimatedCostSoles = updated.estimatedCostSoles,
-                recommendedAction = updated.recommendedAction,
-                acknowledgedAction = updated.acknowledgedAction,
-                previousAlertId = updated.previousAlertId
-            )
+        return ResponseEntity.ok(updated.toResource())
+    }
+
+    private fun LeakAlert.toResource(pushDispatched: Boolean = true, notifiedRecipientsCount: Int = 0) =
+        LeakAlertResource(
+            id = id,
+            accountId = accountId,
+            waterPointId = waterPointId,
+            state = state,
+            urgency = urgency,
+            detectedAt = detectedAt,
+            estimatedVolumeLiters = estimatedVolumeLiters,
+            estimatedCostSoles = estimatedCostSoles,
+            recommendedAction = recommendedAction,
+            acknowledgedAction = acknowledgedAction,
+            previousAlertId = previousAlertId,
+            pushDispatched = pushDispatched,
+            notifiedRecipientsCount = notifiedRecipientsCount
         )
+
+    private fun ConsumptionThreshold.toResource() = ConsumptionThresholdResource(
+        id = id,
+        accountId = accountId,
+        waterPointId = waterPointId,
+        period = period,
+        customLimitLitersPerHour = customLimitLitersPerHour,
+        baselineLitersPerHour = baselineLitersPerHour,
+        effectiveLimitLitersPerHour = effectiveLimit(),
+        source = source,
+        updatedAt = updatedAt
+    )
+
+    private fun NotificationPreference.toResource() = NotificationPreferenceResource(
+        id = id,
+        accountId = accountId,
+        groupingWindowMinutes = groupingWindowMinutes,
+        minimumUrgency = minimumUrgency,
+        updatedAt = updatedAt
+    )
+
+    private fun AuthorizedAlertRecipient.toResource() = AuthorizedRecipientResource(
+        id = id,
+        accountId = accountId,
+        fullName = fullName,
+        email = email,
+        devicePushToken = devicePushToken,
+        enabled = enabled,
+        lastNotifiedAt = lastNotifiedAt
+    )
+
+    private companion object {
+        val DEFAULT_LIMIT_LITERS_PER_HOUR = BigDecimal("125.00")
     }
 }

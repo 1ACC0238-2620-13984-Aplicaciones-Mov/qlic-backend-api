@@ -47,11 +47,10 @@ class SupportIntegrationTest {
     @Test
     @DisplayName("US35, US36 and US37: register an incident, request a visit, assign a technician and follow it up")
     fun incidentLifecycle() {
-        val signUp = mockMvc.perform(
+        mockMvc.perform(
             post("/api/v1/authentication/sign-up").contentType(MediaType.APPLICATION_JSON)
                 .content("""{"fullName":"Claudia Morales","email":"it.support@example.com","password":"Qlic2026!","acceptTerms":true}""")
-        ).andReturn().response.contentAsString
-        val accountId = field(signUp, "accountId")
+        )
         val token = field(
             mockMvc.perform(
                 post("/api/v1/authentication/sign-in").contentType(MediaType.APPLICATION_JSON)
@@ -63,7 +62,6 @@ class SupportIntegrationTest {
 
         mockMvc.perform(
             post("/api/v1/subscriptions/trial").header("Authorization", auth)
-                .contentType(MediaType.APPLICATION_JSON).content("""{"accountId":"$accountId"}""")
         ).andExpect(status().isCreated)
 
         mockMvc.perform(

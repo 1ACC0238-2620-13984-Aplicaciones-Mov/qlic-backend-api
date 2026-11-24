@@ -1,5 +1,6 @@
 package com.wasd.qlic.subscriptions.application.handlers
 
+import com.wasd.qlic.subscriptions.domain.exceptions.SubscriptionNotFoundException
 import com.wasd.qlic.subscriptions.domain.model.*
 import com.wasd.qlic.subscriptions.domain.repositories.*
 import org.springframework.stereotype.Service
@@ -19,11 +20,13 @@ data class StartTrialCommand(
 
 data class ChangePlanCommand(
     val subscriptionId: UUID,
+    val accountId: UUID,
     val newPlan: PlanType
 )
 
 data class CancelSubscriptionCommand(
-    val subscriptionId: UUID
+    val subscriptionId: UUID,
+    val accountId: UUID
 )
 
 data class PurchaseResult(
@@ -129,16 +132,14 @@ class SubscriptionCommandHandler(
 
     // US33 - Escenario 1: Cambiar de plan a partir del siguiente periodo de facturación
     fun changePlan(command: ChangePlanCommand): Subscription {
-        val sub = subscriptionRepository.findById(command.subscriptionId)
-            ?: throw IllegalArgumentException("Suscripción no encontrada: ${command.subscriptionId}")
+        val sub = findOwnedSubscription(command.subscriptionId, command.accountId)
         sub.schedulePlanChange(command.newPlan)
         return subscriptionRepository.save(sub)
     }
 
     // US33 - Escenario 2: Cancelar suscripción manteniendo acceso hasta el término del periodo pagado
     fun cancelSubscription(command: CancelSubscriptionCommand): Subscription {
-        val sub = subscriptionRepository.findById(command.subscriptionId)
-            ?: throw IllegalArgumentException("Suscripción no encontrada: ${command.subscriptionId}")
+        val sub = findOwnedSubscription(command.subscriptionId, command.accountId)
         sub.cancelSubscription()
         return subscriptionRepository.save(sub)
     }
@@ -146,4 +147,9 @@ class SubscriptionCommandHandler(
     // US34: Consultar el historial de pagos
     fun getPaymentHistory(accountId: UUID): List<PaymentRecord> =
         paymentRepository.findAllByAccountId(accountId)
+
+    private fun findOwnedSubscription(subscriptionId: UUID, accountId: UUID): Subscription =
+        subscriptionRepository.findById(subscriptionId)
+            ?.takeIf { it.accountId == accountId }
+            ?: throw SubscriptionNotFoundException()
 }

@@ -1,5 +1,6 @@
 package com.wasd.qlic.subscriptions.application.handlers
 
+import com.wasd.qlic.subscriptions.domain.exceptions.SubscriptionNotFoundException
 import com.wasd.qlic.subscriptions.domain.model.*
 import com.wasd.qlic.subscriptions.domain.repositories.*
 import org.junit.jupiter.api.Assertions.*
@@ -113,14 +114,30 @@ class SubscriptionCommandHandlerTest {
             PurchaseSubscriptionCommand(accountId, PlanType.HOME_BASIC, "YAPE", false)
         ).subscription!!
 
-        val changed = handler.changePlan(ChangePlanCommand(sub.id, PlanType.HOME_PRO))
+        val changed = handler.changePlan(ChangePlanCommand(sub.id, accountId, PlanType.HOME_PRO))
         assertEquals(PlanType.HOME_BASIC, changed.currentPlan)
         assertEquals(PlanType.HOME_PRO, changed.nextBillingPlan)
 
-        val cancelled = handler.cancelSubscription(CancelSubscriptionCommand(sub.id))
+        val cancelled = handler.cancelSubscription(CancelSubscriptionCommand(sub.id, accountId))
         assertEquals(SubscriptionStatus.CANCELLED_PENDING_EXPIRATION, cancelled.status)
         assertFalse(cancelled.autoRenew)
         assertTrue(cancelled.hasPaidFeaturesAccess())
+    }
+
+    // US33: a subscription of another account cannot be changed or cancelled
+    @Test
+    fun `should reject changing or cancelling a subscription of another account`() {
+        val sub = handler.purchaseSubscription(
+            PurchaseSubscriptionCommand(UUID.randomUUID(), PlanType.HOME_BASIC, "YAPE", false)
+        ).subscription!!
+        val otherAccount = UUID.randomUUID()
+
+        assertThrows(SubscriptionNotFoundException::class.java) {
+            handler.changePlan(ChangePlanCommand(sub.id, otherAccount, PlanType.HOME_PRO))
+        }
+        assertThrows(SubscriptionNotFoundException::class.java) {
+            handler.cancelSubscription(CancelSubscriptionCommand(sub.id, otherAccount))
+        }
     }
 
     // US34 - Escenario 1: Consultar historial de pagos con fecha, monto, plan y estado

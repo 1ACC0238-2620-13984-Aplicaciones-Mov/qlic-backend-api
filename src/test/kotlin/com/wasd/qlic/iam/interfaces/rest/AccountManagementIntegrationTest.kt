@@ -112,7 +112,6 @@ class AccountManagementIntegrationTest {
 
         mockMvc.perform(
             post("/api/v1/subscriptions/trial").header("Authorization", "Bearer $ownerToken")
-                .contentType(MediaType.APPLICATION_JSON).content("""{"accountId":"$ownerAccountId"}""")
         ).andExpect(status().isCreated)
 
         val invitation = mockMvc.perform(
@@ -130,12 +129,12 @@ class AccountManagementIntegrationTest {
 
         val viewerToken = signIn("it.viewer@example.com", accountId = ownerAccountId)
 
-        mockMvc.perform(get("/api/v1/devices").param("accountId", ownerAccountId).header("Authorization", "Bearer $viewerToken"))
+        mockMvc.perform(get("/api/v1/devices").header("Authorization", "Bearer $viewerToken"))
             .andExpect(status().isOk)
 
         mockMvc.perform(
             post("/api/v1/devices").header("Authorization", "Bearer $viewerToken").contentType(MediaType.APPLICATION_JSON)
-                .content("""{"qrCodePayload":"QLIC-QR-IT-01","serialNumber":"QLIC-IT-01","model":"QlicSense","accountId":"$ownerAccountId"}""")
+                .content("""{"qrCodePayload":"QLIC-QR-IT-01","serialNumber":"QLIC-IT-01","model":"QlicSense"}""")
         )
             .andExpect(status().isForbidden)
             .andExpect(jsonPath("$.code").value("iam.permission.denied"))
