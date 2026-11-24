@@ -2,6 +2,8 @@ package com.wasd.qlic.monitoring.application.handlers
 
 import com.wasd.qlic.monitoring.application.commands.AssignWaterPointCommand
 import com.wasd.qlic.monitoring.application.commands.RegisterDeviceCommand
+import com.wasd.qlic.monitoring.domain.exceptions.DeviceAlreadyRegisteredException
+import com.wasd.qlic.monitoring.domain.exceptions.DeviceNotFoundException
 import com.wasd.qlic.monitoring.domain.model.DeviceStatus
 import com.wasd.qlic.monitoring.domain.model.IoTDevice
 import com.wasd.qlic.monitoring.domain.repositories.IoTDeviceRepository
@@ -56,11 +58,36 @@ class DeviceCommandHandlerTest {
         val targetWaterPointId = UUID.randomUUID()
 
         val updated = handler.handleAssignWaterPoint(
-            AssignWaterPointCommand(deviceId = device.id, waterPointId = targetWaterPointId)
+            AssignWaterPointCommand(deviceId = device.id, waterPointId = targetWaterPointId, accountId = accountId)
         )
 
-        assertNotNull(updated)
-        assertEquals(targetWaterPointId, updated?.waterPointId)
+        assertEquals(targetWaterPointId, updated.waterPointId)
+    }
+
+    @Test
+    @DisplayName("US11: a device of another account cannot be assigned to a Water Point")
+    fun shouldRejectAssigningDeviceOfAnotherAccount() {
+        val device = fakeRepository.save(
+            IoTDevice(serialNumber = "SN-003", model = "FlowMeter", qrCodePayload = "QR-TEST-003", accountId = UUID.randomUUID())
+        )
+
+        assertThrows(DeviceNotFoundException::class.java) {
+            handler.handleAssignWaterPoint(
+                AssignWaterPointCommand(deviceId = device.id, waterPointId = UUID.randomUUID(), accountId = UUID.randomUUID())
+            )
+        }
+    }
+
+    @Test
+    @DisplayName("US10: a serial number registered in another account is rejected")
+    fun shouldRejectSerialNumberOfAnotherAccount() {
+        val owner = UUID.randomUUID()
+        handler.handleRegister(RegisterDeviceCommand("QR-TEST-004", "SN-004", "FlowMeter", owner))
+
+        assertThrows(DeviceAlreadyRegisteredException::class.java) {
+            handler.handleRegister(RegisterDeviceCommand("QR-TEST-004", "SN-004", "FlowMeter", UUID.randomUUID()))
+        }
+        assertEquals(owner, handler.handleRegister(RegisterDeviceCommand("QR-TEST-004", "SN-004", "FlowMeter", owner)).accountId)
     }
 }
 
