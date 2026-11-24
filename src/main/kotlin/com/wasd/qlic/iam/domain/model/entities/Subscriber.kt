@@ -20,4 +20,16 @@ class Subscriber(
     init {
         require(fullName.isNotBlank()) { "Full name is required" }
     }
+
+    /** US09: updates the profile data; the full name is mandatory. */
+    fun updateProfile(newFullName: String, newPhone: String?) {
+        require(newFullName.isNotBlank()) { "Full name is required" }
+        fullName = newFullName.trim()
+        phone = newPhone?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
+    /** US07: replaces the password after a valid reset. */
+    fun changePassword(newHash: PasswordHash) {
+        passwordHash = newHash
+    }
 }

@@ -1,0 +1,47 @@
+# Render Blueprint: RESTful API (Docker) + managed PostgreSQL.
+# Render > New > Blueprint > select this repository. The database credentials and the
+# JWT secret are injected as environment variables; nothing sensitive is committed.
+databases:
+  - name: qlic-postgres
+    plan: free
+    databaseName: qlic
+    user: qlic
+    region: oregon
+
+services:
+  - type: web
+    name: qlic-backend-api
+    runtime: docker
+    plan: free
+    region: oregon
+    branch: main
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /v3/api-docs
+    autoDeploy: true
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+      - key: DB_HOST
+        fromDatabase:
+          name: qlic-postgres
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: qlic-postgres
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: qlic-postgres
+          property: database
+      - key: SPRING_DATASOURCE_USERNAME
+        fromDatabase:
+          name: qlic-postgres
+          property: user
+      - key: SPRING_DATASOURCE_PASSWORD
+        fromDatabase:
+          name: qlic-postgres
+          property: password
+      - key: JWT_SECRET
+        generateValue: true
+      - key: PASSWORD_RESET_EXPOSE_TOKEN
+        value: "true"

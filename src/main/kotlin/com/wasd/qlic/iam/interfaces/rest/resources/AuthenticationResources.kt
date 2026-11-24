@@ -42,7 +42,14 @@ data class SignInResource(
 
     @field:NotBlank(message = "{validation.password.required}")
     @field:Schema(example = "Qlic2026!", format = "password")
-    val password: String
+    val password: String,
+
+    @field:Schema(
+        description = "Optional. Account shared with the subscriber (US08). When omitted, the session is " +
+            "opened over the subscriber's own account.",
+        nullable = true
+    )
+    val accountId: UUID? = null
 )
 
 @Schema(description = "Created subscriber account.")
@@ -65,5 +72,7 @@ data class AuthenticationResource(
     @field:Schema(description = "JWT signed with HS256. Send it in the Authorization header.")
     val token: String,
     @field:Schema(example = "Bearer") val tokenType: String,
-    val expiresAt: Instant
+    val expiresAt: Instant,
+    @field:Schema(description = "Permission level over the account of the session (US08)", example = "OWNER")
+    val permission: String
 )

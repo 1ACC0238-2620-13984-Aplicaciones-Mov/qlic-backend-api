@@ -30,7 +30,7 @@ class AuthenticateCommandHandlerTest {
                 )
             )
         handler = AuthenticateCommandHandler(
-            subscribers, accounts, AuthenticationService(hasher, FakeTokenProvider())
+            subscribers, accounts, InMemoryAuthorizedUserRepository(), AuthenticationService(hasher, FakeTokenProvider())
         )
     }
 

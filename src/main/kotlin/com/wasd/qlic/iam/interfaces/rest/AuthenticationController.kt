@@ -76,7 +76,8 @@ class AuthenticationController(
     @SecurityRequirements // public endpoint: no token required
     @Operation(
         summary = "Sign in to the mobile application (US06)",
-        description = "Validates the credentials and issues a JWT access token with its expiration time (TS01)."
+        description = "Validates the credentials and issues a JWT access token with its expiration time (TS01). " +
+            "Send accountId to open the session over an account shared with you (US08)."
     )
     @ApiResponses(
         ApiResponse(responseCode = "200", description = "Authenticated; returns the access token"),
@@ -87,11 +88,15 @@ class AuthenticationController(
         ApiResponse(
             responseCode = "401", description = "Invalid credentials",
             content = [Content(schema = Schema(implementation = ProblemDetail::class))]
+        ),
+        ApiResponse(
+            responseCode = "403", description = "The requested account is not shared with the subscriber",
+            content = [Content(schema = Schema(implementation = ProblemDetail::class))]
         )
     )
     fun signIn(@Valid @RequestBody resource: SignInResource): ResponseEntity<AuthenticationResource> {
         val session = authenticateCommandHandler.handle(
-            AuthenticateCommand(email = resource.email, password = resource.password)
+            AuthenticateCommand(email = resource.email, password = resource.password, accountId = resource.accountId)
         )
         return ResponseEntity.ok(
             AuthenticationResource(
@@ -101,7 +106,8 @@ class AuthenticationController(
                 fullName = session.subscriber.fullName,
                 token = session.accessToken.value,
                 tokenType = session.accessToken.type,
-                expiresAt = session.accessToken.expiresAt
+                expiresAt = session.accessToken.expiresAt,
+                permission = session.permission.name
             )
         )
     }
