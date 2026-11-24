@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "com.wasd.qlic"
-version = "0.0.1-SNAPSHOT"
+version = "1.2.1"
 
 java {
 	toolchain {
