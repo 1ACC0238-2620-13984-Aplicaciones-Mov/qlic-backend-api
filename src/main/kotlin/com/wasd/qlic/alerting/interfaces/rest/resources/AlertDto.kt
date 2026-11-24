@@ -7,8 +7,8 @@ import java.math.BigDecimal
 import java.time.LocalDateTime
 import java.util.UUID
 
+/** Requests carry no accountId: the account is taken from the access token. */
 data class EvaluateReadingRequest(
-    val accountId: UUID,
     val waterPointId: UUID,
     val currentFlowLitersPerHour: BigDecimal,
     val thresholdLimit: BigDecimal? = null,
@@ -33,7 +33,6 @@ data class LeakAlertResource(
 
 // US17 DTOs
 data class ConfigureThresholdRequest(
-    val accountId: UUID,
     val waterPointId: UUID,
     val period: String = "HOURLY",
     val customLimitLitersPerHour: BigDecimal? = null,
@@ -54,7 +53,6 @@ data class ConsumptionThresholdResource(
 
 // US18 DTOs
 data class ConfigureNotificationPreferenceRequest(
-    val accountId: UUID,
     val groupingWindowMinutes: Int = 30,
     val minimumUrgency: UrgencyLevel = UrgencyLevel.INFORMATIONAL
 )
@@ -69,7 +67,6 @@ data class NotificationPreferenceResource(
 
 // US19 DTOs
 data class AddAuthorizedRecipientRequest(
-    val accountId: UUID,
     val fullName: String,
     val email: String,
     val devicePushToken: String,
@@ -92,6 +89,5 @@ data class AuthorizedRecipientResource(
 
 // US20 DTOs
 data class AcknowledgeAlertRequest(
-    val accountId: UUID,
     val actionTaken: String
 )
