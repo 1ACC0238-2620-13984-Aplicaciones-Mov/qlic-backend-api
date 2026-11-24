@@ -2,22 +2,24 @@ package com.wasd.qlic.subscriptions.interfaces.rest
 
 import com.wasd.qlic.subscriptions.application.handlers.*
 import com.wasd.qlic.subscriptions.domain.model.*
+import com.wasd.qlic.shared.interfaces.rest.security.accountId
+import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.Parameter
+import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.security.core.annotation.AuthenticationPrincipal
+import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.web.bind.annotation.*
 import java.math.BigDecimal
 import java.time.LocalDateTime
 import java.util.UUID
 
+/** The account is taken from the access token, so the request does not carry an accountId. */
 data class PurchaseSubscriptionRequest(
-    val accountId: UUID,
     val plan: PlanType,
     val paymentMethod: String = "YAPE_PLIN_OR_CARD",
     val simulatePaymentRejected: Boolean = false
-)
-
-data class StartTrialRequest(
-    val accountId: UUID
 )
 
 data class ChangePlanRequest(
@@ -58,6 +60,7 @@ data class PurchaseSubscriptionResponse(
 
 @RestController
 @RequestMapping("/api/v1/subscriptions")
+@Tag(name = "Subscriptions", description = "Plans, free trial and payments of the account of the session")
 class SubscriptionController(
     private val handler: SubscriptionCommandHandler
 ) {
@@ -87,14 +90,15 @@ class SubscriptionController(
         paidAt = paidAt
     )
 
-    // US31: Contratar un plan de suscripción
     @PostMapping
+    @Operation(summary = "Purchase a subscription plan (US31)")
     fun purchaseSubscription(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @RequestBody req: PurchaseSubscriptionRequest
     ): ResponseEntity<PurchaseSubscriptionResponse> {
         val result = handler.purchaseSubscription(
             PurchaseSubscriptionCommand(
-                accountId = req.accountId,
+                accountId = jwt.accountId(),
                 plan = req.plan,
                 paymentMethod = req.paymentMethod,
                 simulatePaymentRejected = req.simulatePaymentRejected
@@ -114,46 +118,54 @@ class SubscriptionController(
         )
     }
 
-    // US32: Activar periodo de prueba (una única vez por suscriptor)
     @PostMapping("/trial")
-    fun startFreeTrial(@RequestBody req: StartTrialRequest): ResponseEntity<Any> {
+    @Operation(summary = "Start the free trial, once per subscriber (US32)")
+    fun startFreeTrial(@Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt): ResponseEntity<Any> {
         return try {
-            val sub = handler.startFreeTrial(StartTrialCommand(req.accountId))
+            val sub = handler.startFreeTrial(StartTrialCommand(jwt.accountId()))
             ResponseEntity.status(HttpStatus.CREATED).body(sub.toResource())
         } catch (ex: IllegalStateException) {
             ResponseEntity.status(HttpStatus.CONFLICT).body(mapOf("error" to ex.message))
         }
     }
 
-    // US32: Consultar estado actual de suscripción y vigencia de funcionalidades
     @GetMapping("/current")
-    fun getCurrentSubscription(@RequestParam accountId: UUID): ResponseEntity<SubscriptionResource> {
-        val sub = handler.getCurrentSubscription(accountId)
+    @Operation(summary = "Get the current subscription of the account and its features (US32)")
+    fun getCurrentSubscription(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt
+    ): ResponseEntity<SubscriptionResource> {
+        val sub = handler.getCurrentSubscription(jwt.accountId())
             ?: return ResponseEntity.notFound().build()
         return ResponseEntity.ok(sub.toResource())
     }
 
-    // US33 - Escenario 1: Cambiar el plan contratado para el siguiente periodo
     @PatchMapping("/{subscriptionId}/plan")
+    @Operation(summary = "Change the plan from the next billing period (US33)")
     fun changePlan(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @PathVariable subscriptionId: UUID,
         @RequestBody req: ChangePlanRequest
     ): ResponseEntity<SubscriptionResource> {
-        val updated = handler.changePlan(ChangePlanCommand(subscriptionId, req.newPlan))
+        val updated = handler.changePlan(ChangePlanCommand(subscriptionId, jwt.accountId(), req.newPlan))
         return ResponseEntity.ok(updated.toResource())
     }
 
-    // US33 - Escenario 2: Cancelar el plan contratado manteniendo acceso hasta fin de periodo
     @PostMapping("/{subscriptionId}/cancel")
-    fun cancelSubscription(@PathVariable subscriptionId: UUID): ResponseEntity<SubscriptionResource> {
-        val cancelled = handler.cancelSubscription(CancelSubscriptionCommand(subscriptionId))
+    @Operation(summary = "Cancel the subscription keeping access until the end of the paid period (US33)")
+    fun cancelSubscription(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
+        @PathVariable subscriptionId: UUID
+    ): ResponseEntity<SubscriptionResource> {
+        val cancelled = handler.cancelSubscription(CancelSubscriptionCommand(subscriptionId, jwt.accountId()))
         return ResponseEntity.ok(cancelled.toResource())
     }
 
-    // US34: Consultar el historial de pagos
     @GetMapping("/payments")
-    fun getPaymentHistory(@RequestParam accountId: UUID): ResponseEntity<List<PaymentRecordResource>> {
-        val payments = handler.getPaymentHistory(accountId).map { it.toResource() }
+    @Operation(summary = "List the payment history of the account (US34)")
+    fun getPaymentHistory(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt
+    ): ResponseEntity<List<PaymentRecordResource>> {
+        val payments = handler.getPaymentHistory(jwt.accountId()).map { it.toResource() }
         return ResponseEntity.ok(payments)
     }
 }
