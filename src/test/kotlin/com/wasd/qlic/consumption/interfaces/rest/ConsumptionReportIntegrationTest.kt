@@ -62,9 +62,24 @@ class ConsumptionReportIntegrationTest {
                 .andReturn().response.contentAsString,
             "id"
         )
+        mockMvc.perform(post("/api/v1/subscriptions/trial").header("Authorization", auth)).andExpect(status().isCreated)
+        val locationId = field(
+            mockMvc.perform(
+                post("/api/v1/locations").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"name":"Restaurante Lazo"}""")
+            ).andExpect(status().isCreated).andReturn().response.contentAsString,
+            "id"
+        )
+        val waterPointId = field(
+            mockMvc.perform(
+                post("/api/v1/water-points").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"locationId":"$locationId","name":"Cocina","type":"KITCHEN"}""")
+            ).andExpect(status().isCreated).andReturn().response.contentAsString,
+            "id"
+        )
         mockMvc.perform(
             patch("/api/v1/devices/$deviceId/water-point").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
-                .content("""{"waterPointId":"3fa85f64-5717-4562-b3fc-2c963f66afa6"}""")
+                .content("""{"waterPointId":"$waterPointId"}""")
         ).andExpect(status().isOk)
 
         mockMvc.perform(get("/api/v1/consumption/reports/activity-hours").header("Authorization", auth)
