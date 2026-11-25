@@ -82,14 +82,22 @@ class InvitationController(
     }
 
     @GetMapping("/api/v1/invitations")
-    @Operation(summary = "List the invitations issued by the account of the session (US08)")
+    @Operation(
+        summary = "List the invitations issued by the account of the session (US08)",
+        description = "Returns the invitations sent by the account with the invited e-mail, permission level, state and " +
+            "expiration date."
+    )
     fun getIssuedInvitations(@Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt): ResponseEntity<List<InvitationResource>> =
         ResponseEntity.ok(
             accountQueryHandler.handle(GetInvitationsByAccountQuery(jwt.accountId())).map { it.toResource(null) }
         )
 
     @GetMapping("/api/v1/invitations/received")
-    @Operation(summary = "List the pending invitations addressed to me (US08)")
+    @Operation(
+        summary = "List the pending invitations addressed to me (US08)",
+        description = "Returns the invitations sent to the e-mail of the subscriber of the token that are still pending, so " +
+            "they can be accepted."
+    )
     fun getReceivedInvitations(@Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt): ResponseEntity<List<InvitationResource>> =
         ResponseEntity.ok(
             accountQueryHandler.handle(GetReceivedInvitationsQuery(jwt.subscriberId()))
@@ -130,7 +138,11 @@ class InvitationController(
     }
 
     @GetMapping("/api/v1/authorized-users")
-    @Operation(summary = "List the authorized users of the account of the session (US08)")
+    @Operation(
+        summary = "List the authorized users of the account of the session (US08)",
+        description = "Returns the subscribers who can access the account, with their permission level (VIEWER or OPERATOR) " +
+            "and the date access was granted."
+    )
     fun getAuthorizedUsers(@Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt): ResponseEntity<List<AuthorizedUserResource>> =
         ResponseEntity.ok(
             accountQueryHandler.handle(GetAuthorizedUsersQuery(jwt.accountId())).map {

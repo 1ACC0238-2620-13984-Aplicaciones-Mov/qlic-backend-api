@@ -82,7 +82,11 @@ class WaterPointController(
     }
 
     @GetMapping
-    @Operation(summary = "List the Water Points of the account, optionally of one location (US13)")
+    @Operation(
+        summary = "List the Water Points of the account, optionally of one location (US13)",
+        description = "Returns the Water Points of the account with their location and number of assigned devices. With " +
+            "locationId only those of that location are returned."
+    )
     fun list(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @RequestParam(required = false) locationId: UUID?
@@ -92,7 +96,11 @@ class WaterPointController(
     }
 
     @GetMapping("/{waterPointId}")
-    @Operation(summary = "Get a Water Point of the account")
+    @Operation(
+        summary = "Get a Water Point of the account",
+        description = "Returns the Water Point with its location and number of assigned devices. A Water Point of another " +
+            "account returns 404."
+    )
     fun get(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @PathVariable waterPointId: UUID
@@ -103,7 +111,11 @@ class WaterPointController(
     }
 
     @PutMapping("/{waterPointId}")
-    @Operation(summary = "Rename a Water Point, change its type or move it to another location")
+    @Operation(
+        summary = "Rename a Water Point, change its type or move it to another location",
+        description = "Full replacement of the name, type and location of the Water Point. The devices assigned to it stay " +
+            "assigned."
+    )
     fun update(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @PathVariable waterPointId: UUID,
@@ -123,7 +135,11 @@ class WaterPointController(
     }
 
     @DeleteMapping("/{waterPointId}")
-    @Operation(summary = "Delete a Water Point without assigned devices")
+    @Operation(
+        summary = "Delete a Water Point without assigned devices",
+        description = "Deletes the Water Point and answers 204. When a device is still assigned to it, it returns 409; " +
+            "reassign or unlink the device first."
+    )
     @ApiResponses(
         ApiResponse(responseCode = "204", description = "Water Point deleted"),
         ApiResponse(

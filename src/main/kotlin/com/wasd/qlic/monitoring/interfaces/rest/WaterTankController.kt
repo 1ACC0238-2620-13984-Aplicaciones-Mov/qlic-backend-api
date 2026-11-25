@@ -121,7 +121,11 @@ class WaterTankController(
 ) {
 
     @PostMapping
-    @Operation(summary = "Register a tank in a location (US28)")
+    @Operation(
+        summary = "Register a tank in a location (US28)",
+        description = "Creates a tank in a location of the account with its capacity in liters and its critical level (20% " +
+            "by default). Optionally links the device that reports its level."
+    )
     fun create(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @Valid @RequestBody resource: SaveWaterTankResource
@@ -132,7 +136,11 @@ class WaterTankController(
     }
 
     @GetMapping
-    @Operation(summary = "List the tanks of the account with their current level (US28)")
+    @Operation(
+        summary = "List the tanks of the account with their current level (US28)",
+        description = "Returns every tank with its status, current level and available liters, calculated from the last " +
+            "reported level."
+    )
     fun list(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @RequestParam(required = false) locationId: UUID?
@@ -157,7 +165,11 @@ class WaterTankController(
     }
 
     @PutMapping("/{tankId}")
-    @Operation(summary = "Update the data, critical level or device of a tank")
+    @Operation(
+        summary = "Update the data, critical level or device of a tank",
+        description = "Full replacement of the data of the tank: location, name, capacity, critical level and device. The " +
+            "level history is kept."
+    )
     fun update(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @PathVariable tankId: UUID,
@@ -169,7 +181,10 @@ class WaterTankController(
     }
 
     @DeleteMapping("/{tankId}")
-    @Operation(summary = "Delete a tank and its level history")
+    @Operation(
+        summary = "Delete a tank and its level history",
+        description = "Removes the tank and every level registered for it. Answers 204 without body."
+    )
     fun delete(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @PathVariable tankId: UUID
@@ -204,7 +219,11 @@ class WaterTankController(
     }
 
     @GetMapping("/{tankId}/levels")
-    @Operation(summary = "Level history of a tank (at most 92 days)")
+    @Operation(
+        summary = "Level history of a tank (at most 92 days)",
+        description = "Levels reported between from and to (inclusive, format yyyy-MM-dd), oldest first. A period longer " +
+            "than 92 days or with from after to returns 400."
+    )
     fun levels(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @PathVariable tankId: UUID,

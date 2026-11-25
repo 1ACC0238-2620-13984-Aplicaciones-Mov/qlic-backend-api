@@ -40,7 +40,11 @@ class AccountController(
 ) {
 
     @GetMapping("/me")
-    @Operation(summary = "Get the profile and the account of the session (US09)")
+    @Operation(
+        summary = "Get the profile and the account of the session (US09)",
+        description = "Returns the name, e-mail and phone of the subscriber of the token, the account it is working on and " +
+            "the date it joined."
+    )
     fun getProfile(@Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt): ResponseEntity<ProfileResource> {
         val profile = accountQueryHandler.handle(GetProfileQuery(jwt.subscriberId(), jwt.accountId()))
         return ResponseEntity.ok(profile.toResource(jwt.permissionName()))

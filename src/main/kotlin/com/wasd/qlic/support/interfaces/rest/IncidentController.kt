@@ -89,7 +89,11 @@ class IncidentController(
         ResponseEntity.ok(supportQueryHandler.handle(GetIncidentsByAccountQuery(jwt.accountId())).map { it.toResource() })
 
     @GetMapping("/{incidentId}")
-    @Operation(summary = "Get the detail of an incident (US37)")
+    @Operation(
+        summary = "Get the detail of an incident (US37)",
+        description = "Returns the incident with its state, the technical visit (preferred window, technician and scheduled " +
+            "date) and the resolution. The state history is in GET /{incidentId}/history."
+    )
     fun getIncident(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @PathVariable incidentId: UUID
