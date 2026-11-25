@@ -36,7 +36,7 @@ class OpenApiConfiguration {
                         "Send Accept-Language: es-419 to receive messages in Latin American Spanish; " +
                         "English is the default."
                 )
-                .version("v1.3.1")
+                .version("v1.4.0")
                 .contact(Contact().name("WASD").url("https://github.com/1ACC0238-2620-13984-Aplicaciones-Mov"))
                 .license(License().name("Apache 2.0").url("https://www.apache.org/licenses/LICENSE-2.0"))
         )
