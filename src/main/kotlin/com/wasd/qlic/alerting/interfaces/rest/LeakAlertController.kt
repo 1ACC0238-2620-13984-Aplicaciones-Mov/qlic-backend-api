@@ -9,12 +9,14 @@ import com.wasd.qlic.alerting.domain.exceptions.AlertNotFoundException
 import com.wasd.qlic.alerting.domain.model.AuthorizedAlertRecipient
 import com.wasd.qlic.alerting.domain.model.ConsumptionThreshold
 import com.wasd.qlic.alerting.domain.model.LeakAlert
+import com.wasd.qlic.alerting.domain.model.LeakAlertRaisedEvent
 import com.wasd.qlic.alerting.domain.model.NotificationPreference
 import com.wasd.qlic.alerting.interfaces.rest.resources.*
 import com.wasd.qlic.shared.interfaces.rest.security.accountId
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.tags.Tag
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.annotation.AuthenticationPrincipal
@@ -30,7 +32,8 @@ import java.util.UUID
 class LeakAlertController(
     private val evaluateHandler: EvaluateConsumptionReadingCommandHandler,
     private val getAlertsHandler: GetAlertsByAccountQueryHandler,
-    private val managementHandler: AlertManagementCommandHandler
+    private val managementHandler: AlertManagementCommandHandler,
+    private val eventPublisher: ApplicationEventPublisher
 ) {
 
     @PostMapping("/evaluations")
@@ -58,6 +61,18 @@ class LeakAlertController(
 
         val pushDispatched = managementHandler.getNotificationPreference(accountId).shouldSendPush(result.urgency)
         val notifiedUsers = if (pushDispatched) managementHandler.dispatchPushToAuthorizedUsers(accountId) else emptyList()
+        if (pushDispatched) {
+            eventPublisher.publishEvent(
+                LeakAlertRaisedEvent(
+                    accountId = accountId,
+                    alertId = result.id,
+                    waterPointId = result.waterPointId,
+                    urgency = result.urgency.name,
+                    estimatedVolumeLiters = result.estimatedVolumeLiters,
+                    recipientPushTokens = notifiedUsers.map { it.devicePushToken }
+                )
+            )
+        }
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(result.toResource(pushDispatched = pushDispatched, notifiedRecipientsCount = notifiedUsers.size))
     }
