@@ -34,7 +34,7 @@ class WaterPointCommandHandlerTest {
         waterPoints = InMemoryWaterPointRepository()
         locations = InMemoryLocationRepository()
         plan = FixedPlanEntitlementProvider(maxWaterPoints = 2)
-        locationHandler = LocationCommandHandler(locations, waterPoints)
+        locationHandler = LocationCommandHandler(locations, waterPoints, InMemoryWaterTankRepository())
         waterPointHandler = WaterPointCommandHandler(waterPoints, locations, devices, plan)
     }
 
