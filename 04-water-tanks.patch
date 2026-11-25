@@ -1,0 +1,1334 @@
+From e8114be3f874209eae7193ba90680e25002ac3f0 Mon Sep 17 00:00:00 2001
+From: AlessandroRCL <alessandro.1901.ramiro@gmail.com>
+Date: Tue, 24 Nov 2026 22:09:10 -0500
+Subject: [PATCH 1/2] feat(monitoring): add water tanks with level, low level
+ alert and replenishment prediction (US28-US30)
+
+Tanks belong to a location and can be linked to a device. Each level reading updates
+the current level and the available liters (US28); crossing the critical level
+publishes TankLevelLowEvent once until the tank is refilled (US29). The detail of the
+tank includes the moment of reaching the critical level estimated from the consumption
+pattern since the last refill (US30).
+---
+ .../security/SecurityConfiguration.kt         |   1 +
+ .../application/commands/TankCommands.kt      |  26 ++
+ .../application/handlers/LocationHandlers.kt  |   6 +-
+ .../application/handlers/WaterTankHandlers.kt | 140 ++++++++++
+ .../queries/GetDevicesByAccountQuery.kt       |   9 +
+ .../domain/exceptions/LocationExceptions.kt   |   3 +
+ .../domain/exceptions/TankExceptions.kt       |  10 +
+ .../monitoring/domain/model/TankModels.kt     | 138 ++++++++++
+ .../domain/repositories/TankRepositories.kt   |  20 ++
+ .../ReplenishmentPredictionService.kt         |  63 +++++
+ .../persistence/TankPersistence.kt            | 132 +++++++++
+ .../interfaces/rest/WaterTankController.kt    | 253 ++++++++++++++++++
+ src/main/resources/messages.properties        |  10 +
+ src/main/resources/messages_es_419.properties |  10 +
+ 14 files changed, 820 insertions(+), 1 deletion(-)
+ create mode 100644 src/main/kotlin/com/wasd/qlic/monitoring/application/commands/TankCommands.kt
+ create mode 100644 src/main/kotlin/com/wasd/qlic/monitoring/application/handlers/WaterTankHandlers.kt
+ create mode 100644 src/main/kotlin/com/wasd/qlic/monitoring/domain/exceptions/TankExceptions.kt
+ create mode 100644 src/main/kotlin/com/wasd/qlic/monitoring/domain/model/TankModels.kt
+ create mode 100644 src/main/kotlin/com/wasd/qlic/monitoring/domain/repositories/TankRepositories.kt
+ create mode 100644 src/main/kotlin/com/wasd/qlic/monitoring/domain/services/ReplenishmentPredictionService.kt
+ create mode 100644 src/main/kotlin/com/wasd/qlic/monitoring/infrastructure/persistence/TankPersistence.kt
+ create mode 100644 src/main/kotlin/com/wasd/qlic/monitoring/interfaces/rest/WaterTankController.kt
+
+diff --git a/src/main/kotlin/com/wasd/qlic/iam/infrastructure/security/SecurityConfiguration.kt b/src/main/kotlin/com/wasd/qlic/iam/infrastructure/security/SecurityConfiguration.kt
+index 8d50342..b322a6a 100644
+--- a/src/main/kotlin/com/wasd/qlic/iam/infrastructure/security/SecurityConfiguration.kt
++++ b/src/main/kotlin/com/wasd/qlic/iam/infrastructure/security/SecurityConfiguration.kt
+@@ -112,6 +112,7 @@ class SecurityConfiguration(
+             "/api/v1/devices/**",
+             "/api/v1/locations/**",
+             "/api/v1/water-points/**",
++            "/api/v1/tanks/**",
+             "/api/v1/alerts/**",
+             "/api/v1/consumption/**",
+             "/api/v1/consumption-readings/**",
+diff --git a/src/main/kotlin/com/wasd/qlic/monitoring/application/commands/TankCommands.kt b/src/main/kotlin/com/wasd/qlic/monitoring/application/commands/TankCommands.kt
+new file mode 100644
+index 0000000..0bdb550
+--- /dev/null
++++ b/src/main/kotlin/com/wasd/qlic/monitoring/application/commands/TankCommands.kt
+@@ -0,0 +1,26 @@
++package com.wasd.qlic.monitoring.application.commands
++
++import java.math.BigDecimal
++import java.time.LocalDateTime
++import java.util.UUID
++
++/** US28: registers a tank of a location, optionally monitored by a device of the account. */
++data class SaveWaterTankCommand(
++    val accountId: UUID,
++    val locationId: UUID,
++    val name: String,
++    val capacityLiters: BigDecimal,
++    val criticalLevelPercentage: BigDecimal,
++    val deviceId: UUID?,
++    val tankId: UUID? = null
++)
++
++data class DeleteWaterTankCommand(val tankId: UUID, val accountId: UUID)
++
++/** US28, US29: level reported by the device of the tank. */
++data class RegisterTankLevelCommand(
++    val tankId: UUID,
++    val accountId: UUID,
++    val levelPercentage: BigDecimal,
++    val recordedAt: LocalDateTime?
++)
+diff --git a/src/main/kotlin/com/wasd/qlic/monitoring/application/handlers/LocationHandlers.kt b/src/main/kotlin/com/wasd/qlic/monitoring/application/handlers/LocationHandlers.kt
+index 87c7a1f..dd6ad0e 100644
+--- a/src/main/kotlin/com/wasd/qlic/monitoring/application/handlers/LocationHandlers.kt
++++ b/src/main/kotlin/com/wasd/qlic/monitoring/application/handlers/LocationHandlers.kt
+@@ -11,6 +11,7 @@ import com.wasd.qlic.monitoring.application.queries.GetLocationsQuery
+ import com.wasd.qlic.monitoring.application.queries.GetWaterPointByIdQuery
+ import com.wasd.qlic.monitoring.application.queries.GetWaterPointsQuery
+ import com.wasd.qlic.monitoring.domain.exceptions.InvalidLocationDataException
++import com.wasd.qlic.monitoring.domain.exceptions.LocationHasTanksException
+ import com.wasd.qlic.monitoring.domain.exceptions.LocationHasWaterPointsException
+ import com.wasd.qlic.monitoring.domain.exceptions.LocationNotFoundException
+ import com.wasd.qlic.monitoring.domain.exceptions.WaterPointHasDevicesException
+@@ -21,6 +22,7 @@ import com.wasd.qlic.monitoring.domain.model.WaterPoint
+ import com.wasd.qlic.monitoring.domain.repositories.IoTDeviceRepository
+ import com.wasd.qlic.monitoring.domain.repositories.LocationRepository
+ import com.wasd.qlic.monitoring.domain.repositories.WaterPointRepository
++import com.wasd.qlic.monitoring.domain.repositories.WaterTankRepository
+ import com.wasd.qlic.monitoring.domain.services.PlanEntitlementProvider
+ import org.springframework.stereotype.Component
+ import org.springframework.transaction.annotation.Transactional
+@@ -30,7 +32,8 @@ import java.util.UUID
+ @Component
+ class LocationCommandHandler(
+     private val locationRepository: LocationRepository,
+-    private val waterPointRepository: WaterPointRepository
++    private val waterPointRepository: WaterPointRepository,
++    private val tankRepository: WaterTankRepository
+ ) {
+     @Transactional
+     fun handle(command: CreateLocationCommand): Location =
+@@ -47,6 +50,7 @@ class LocationCommandHandler(
+     fun handle(command: DeleteLocationCommand) {
+         val location = ownedLocation(locationRepository, command.locationId, command.accountId)
+         if (waterPointRepository.existsByLocationId(location.id)) throw LocationHasWaterPointsException()
++        if (tankRepository.existsByLocationId(location.id)) throw LocationHasTanksException()
+         locationRepository.delete(location)
+     }
+ 
+diff --git a/src/main/kotlin/com/wasd/qlic/monitoring/application/handlers/WaterTankHandlers.kt b/src/main/kotlin/com/wasd/qlic/monitoring/application/handlers/WaterTankHandlers.kt
+new file mode 100644
+index 0000000..92769a5
+--- /dev/null
++++ b/src/main/kotlin/com/wasd/qlic/monitoring/application/handlers/WaterTankHandlers.kt
+@@ -0,0 +1,140 @@
++package com.wasd.qlic.monitoring.application.handlers
++
++import com.wasd.qlic.monitoring.application.commands.DeleteWaterTankCommand
++import com.wasd.qlic.monitoring.application.commands.RegisterTankLevelCommand
++import com.wasd.qlic.monitoring.application.commands.SaveWaterTankCommand
++import com.wasd.qlic.monitoring.application.queries.GetTankLevelsQuery
++import com.wasd.qlic.monitoring.application.queries.GetWaterTankQuery
++import com.wasd.qlic.monitoring.application.queries.GetWaterTanksQuery
++import com.wasd.qlic.monitoring.domain.exceptions.DeviceNotFoundException
++import com.wasd.qlic.monitoring.domain.exceptions.InvalidReadingPeriodException
++import com.wasd.qlic.monitoring.domain.exceptions.InvalidWaterTankException
++import com.wasd.qlic.monitoring.domain.exceptions.WaterTankNotFoundException
++import com.wasd.qlic.monitoring.domain.model.ReplenishmentPrediction
++import com.wasd.qlic.monitoring.domain.model.TankLevelLowEvent
++import com.wasd.qlic.monitoring.domain.model.TankLevelReading
++import com.wasd.qlic.monitoring.domain.model.WaterTank
++import com.wasd.qlic.monitoring.domain.repositories.IoTDeviceRepository
++import com.wasd.qlic.monitoring.domain.repositories.LocationRepository
++import com.wasd.qlic.monitoring.domain.repositories.TankLevelReadingRepository
++import com.wasd.qlic.monitoring.domain.repositories.WaterTankRepository
++import com.wasd.qlic.monitoring.domain.services.ReplenishmentPredictionService
++import org.springframework.context.ApplicationEventPublisher
++import org.springframework.stereotype.Component
++import org.springframework.transaction.annotation.Transactional
++import java.time.LocalDateTime
++import java.time.LocalTime
++import java.time.temporal.ChronoUnit
++import java.util.UUID
++
++/** A tank with the prediction of when it will reach its critical level. */
++data class WaterTankDetail(val tank: WaterTank, val prediction: ReplenishmentPrediction)
++
++/** Result of registering a level: the updated tank and whether the low level alert was raised (US29). */
++data class TankLevelRegistration(val tank: WaterTank, val reading: TankLevelReading, val lowLevelAlertRaised: Boolean)
++
++/** US28, US29, US30: administration of the tanks, ingestion of their levels and replenishment prediction. */
++@Component
++class WaterTankCommandHandler(
++    private val tankRepository: WaterTankRepository,
++    private val levelRepository: TankLevelReadingRepository,
++    private val locationRepository: LocationRepository,
++    private val deviceRepository: IoTDeviceRepository,
++    private val predictionService: ReplenishmentPredictionService,
++    private val eventPublisher: ApplicationEventPublisher
++) {
++    @Transactional
++    fun handle(command: SaveWaterTankCommand): WaterTank {
++        ownedLocation(locationRepository, command.locationId, command.accountId)
++        command.deviceId?.let { deviceId ->
++            deviceRepository.findById(deviceId)?.takeIf { it.accountId == command.accountId } ?: throw DeviceNotFoundException()
++        }
++        val tank = tankOrInvalid {
++            command.tankId?.let { id ->
++                ownedTank(id, command.accountId).also {
++                    it.update(command.name, command.locationId, command.capacityLiters, command.criticalLevelPercentage, command.deviceId)
++                }
++            } ?: WaterTank(
++                accountId = command.accountId,
++                locationId = command.locationId,
++                name = command.name,
++                capacityLiters = command.capacityLiters,
++                criticalLevelPercentage = command.criticalLevelPercentage,
++                deviceId = command.deviceId
++            )
++        }
++        return tankRepository.save(tank)
++    }
++
++    @Transactional
++    fun handle(command: DeleteWaterTankCommand) {
++        val tank = ownedTank(command.tankId, command.accountId)
++        levelRepository.deleteByTankId(tank.id)
++        tankRepository.delete(tank)
++    }
++
++    /** US29 - Scenario 1: crossing the critical level publishes TankLevelLowEvent with the tank and its level. */
++    @Transactional
++    fun handle(command: RegisterTankLevelCommand): TankLevelRegistration {
++        val tank = ownedTank(command.tankId, command.accountId)
++        val recordedAt = command.recordedAt ?: LocalDateTime.now()
++        val raised = tankOrInvalid { tank.registerLevel(command.levelPercentage, recordedAt) }
++        val reading = levelRepository.save(
++            TankLevelReading(tankId = tank.id, accountId = tank.accountId, levelPercentage = command.levelPercentage, recordedAt = recordedAt)
++        )
++        val saved = tankRepository.save(tank)
++        if (raised) {
++            eventPublisher.publishEvent(
++                TankLevelLowEvent(
++                    accountId = saved.accountId,
++                    tankId = saved.id,
++                    tankName = saved.name,
++                    levelPercentage = command.levelPercentage,
++                    criticalLevelPercentage = saved.criticalLevelPercentage,
++                    occurredAt = recordedAt
++                )
++            )
++        }
++        return TankLevelRegistration(saved, reading, raised)
++    }
++
++    @Transactional(readOnly = true)
++    fun handle(query: GetWaterTanksQuery): List<WaterTank> {
++        val tanks = tankRepository.findByAccountId(query.accountId)
++        val locationId = query.locationId ?: return tanks
++        ownedLocation(locationRepository, locationId, query.accountId)
++        return tanks.filter { it.locationId == locationId }
++    }
++
++    /** US28 - Scenario 1 and US30: current level, last reading and prediction from the last 7 days. */
++    @Transactional(readOnly = true)
++    fun handle(query: GetWaterTankQuery): WaterTankDetail {
++        val tank = ownedTank(query.tankId, query.accountId)
++        val to = tank.lastReadingAt ?: return WaterTankDetail(tank, ReplenishmentPrediction.UNAVAILABLE)
++        val history = levelRepository.findByTankIdBetween(tank.id, to.minusDays(PREDICTION_HISTORY_DAYS), to)
++        return WaterTankDetail(tank, predictionService.predict(tank, history))
++    }
++
++    @Transactional(readOnly = true)
++    fun handle(query: GetTankLevelsQuery): List<TankLevelReading> {
++        if (query.to.isBefore(query.from) || ChronoUnit.DAYS.between(query.from, query.to) > MAX_HISTORY_DAYS) {
++            throw InvalidReadingPeriodException()
++        }
++        val tank = ownedTank(query.tankId, query.accountId)
++        return levelRepository.findByTankIdBetween(tank.id, query.from.atStartOfDay(), query.to.atTime(LocalTime.MAX))
++    }
++
++    private fun ownedTank(tankId: UUID, accountId: UUID): WaterTank =
++        tankRepository.findById(tankId)?.takeIf { it.accountId == accountId } ?: throw WaterTankNotFoundException()
++
++    private inline fun <T> tankOrInvalid(block: () -> T): T = try {
++        block()
++    } catch (exception: IllegalArgumentException) {
++        throw InvalidWaterTankException()
++    }
++
++    private companion object {
++        const val PREDICTION_HISTORY_DAYS = 7L
++        const val MAX_HISTORY_DAYS = 92L
++    }
++}
+diff --git a/src/main/kotlin/com/wasd/qlic/monitoring/application/queries/GetDevicesByAccountQuery.kt b/src/main/kotlin/com/wasd/qlic/monitoring/application/queries/GetDevicesByAccountQuery.kt
+index c5d48e5..a596e14 100644
+--- a/src/main/kotlin/com/wasd/qlic/monitoring/application/queries/GetDevicesByAccountQuery.kt
++++ b/src/main/kotlin/com/wasd/qlic/monitoring/application/queries/GetDevicesByAccountQuery.kt
+@@ -32,3 +32,12 @@ data class GetMonitoringDashboardQuery(
+     val locationId: UUID? = null,
+     val now: java.time.LocalDateTime = java.time.LocalDateTime.now()
+ )
++
++/** US28: tanks of the account, optionally of one location. */
++data class GetWaterTanksQuery(val accountId: UUID, val locationId: UUID? = null)
++
++/** US28, US30: detail of a tank with its replenishment prediction. */
++data class GetWaterTankQuery(val tankId: UUID, val accountId: UUID)
++
++/** Level history of a tank in a period. */
++data class GetTankLevelsQuery(val tankId: UUID, val accountId: UUID, val from: LocalDate, val to: LocalDate)
+diff --git a/src/main/kotlin/com/wasd/qlic/monitoring/domain/exceptions/LocationExceptions.kt b/src/main/kotlin/com/wasd/qlic/monitoring/domain/exceptions/LocationExceptions.kt
+index b9e402e..404a934 100644
+--- a/src/main/kotlin/com/wasd/qlic/monitoring/domain/exceptions/LocationExceptions.kt
++++ b/src/main/kotlin/com/wasd/qlic/monitoring/domain/exceptions/LocationExceptions.kt
+@@ -22,3 +22,6 @@ class WaterPointLimitReachedException(limit: Int) :
+ 
+ /** The name is blank or too long. */
+ class InvalidLocationDataException : DomainException("monitoring.location.invalid")
++
++/** A location with tanks cannot be deleted; they must be deleted first. */
++class LocationHasTanksException : BusinessConflictException("monitoring.location.has-tanks")
+diff --git a/src/main/kotlin/com/wasd/qlic/monitoring/domain/exceptions/TankExceptions.kt b/src/main/kotlin/com/wasd/qlic/monitoring/domain/exceptions/TankExceptions.kt
+new file mode 100644
+index 0000000..ba51323
+--- /dev/null
++++ b/src/main/kotlin/com/wasd/qlic/monitoring/domain/exceptions/TankExceptions.kt
+@@ -0,0 +1,10 @@
++package com.wasd.qlic.monitoring.domain.exceptions
++
++import com.wasd.qlic.shared.domain.exceptions.DomainException
++import com.wasd.qlic.shared.domain.exceptions.ResourceNotFoundException
++
++/** The tank does not exist or belongs to another account (US28). */
++class WaterTankNotFoundException : ResourceNotFoundException("monitoring.tank.not-found")
++
++/** Name, capacity, critical level or reported level out of range. */
++class InvalidWaterTankException : DomainException("monitoring.tank.invalid")
+diff --git a/src/main/kotlin/com/wasd/qlic/monitoring/domain/model/TankModels.kt b/src/main/kotlin/com/wasd/qlic/monitoring/domain/model/TankModels.kt
+new file mode 100644
+index 0000000..e68a5c2
+--- /dev/null
++++ b/src/main/kotlin/com/wasd/qlic/monitoring/domain/model/TankModels.kt
+@@ -0,0 +1,138 @@
++package com.wasd.qlic.monitoring.domain.model
++
++import java.math.BigDecimal
++import java.math.RoundingMode
++import java.time.Instant
++import java.time.LocalDateTime
++import java.util.UUID
++
++/** Level of the tank derived from its last reading. */
++enum class TankStatus { NO_DATA, NORMAL, LOW }
++
++/**
++ * Entity: storage tank of a location whose level is monitored by a device (US28). When the level falls
++ * below its critical value it raises TankLevelLowEvent once (US29); the alert is rearmed when the tank
++ * is refilled above the critical value plus a margin, so a level oscillating around the limit does not
++ * notify repeatedly.
++ */
++class WaterTank(
++    val id: UUID = UUID.randomUUID(),
++    val accountId: UUID,
++    locationId: UUID,
++    name: String,
++    capacityLiters: BigDecimal,
++    criticalLevelPercentage: BigDecimal = BigDecimal(20),
++    deviceId: UUID? = null,
++    currentLevelPercentage: BigDecimal? = null,
++    lastReadingAt: LocalDateTime? = null,
++    lowLevelAlertActive: Boolean = false,
++    val createdAt: Instant = Instant.now()
++) {
++    var locationId: UUID = locationId
++        private set
++    var name: String = name.trim()
++        private set
++    var capacityLiters: BigDecimal = capacityLiters
++        private set
++    var criticalLevelPercentage: BigDecimal = criticalLevelPercentage
++        private set
++    var deviceId: UUID? = deviceId
++        private set
++    var currentLevelPercentage: BigDecimal? = currentLevelPercentage
++        private set
++    var lastReadingAt: LocalDateTime? = lastReadingAt
++        private set
++    var lowLevelAlertActive: Boolean = lowLevelAlertActive
++        private set
++
++    init {
++        validate(this.name, capacityLiters, criticalLevelPercentage)
++    }
++
++    val status: TankStatus
++        get() = when (val level = currentLevelPercentage) {
++            null -> TankStatus.NO_DATA
++            else -> if (level <= criticalLevelPercentage) TankStatus.LOW else TankStatus.NORMAL
++        }
++
++    /** TankLevel: liters available according to the last reading. */
++    val availableLiters: BigDecimal?
++        get() = currentLevelPercentage?.let {
++            capacityLiters.multiply(it).divide(BigDecimal(100), 2, RoundingMode.HALF_UP)
++        }
++
++    fun update(name: String, locationId: UUID, capacityLiters: BigDecimal, criticalLevelPercentage: BigDecimal, deviceId: UUID?) {
++        validate(name.trim(), capacityLiters, criticalLevelPercentage)
++        this.name = name.trim()
++        this.locationId = locationId
++        this.capacityLiters = capacityLiters
++        this.criticalLevelPercentage = criticalLevelPercentage
++        this.deviceId = deviceId
++    }
++
++    /**
++     * Registers a level reading. Returns true when the level has just crossed the critical value, which
++     * is when TankLevelLowEvent must be published.
++     */
++    fun registerLevel(levelPercentage: BigDecimal, recordedAt: LocalDateTime): Boolean {
++        require(levelPercentage >= BigDecimal.ZERO && levelPercentage <= BigDecimal(100)) { "The level must be between 0 and 100" }
++        val previousReadingAt = lastReadingAt
++        if (previousReadingAt == null || !recordedAt.isBefore(previousReadingAt)) {
++            currentLevelPercentage = levelPercentage
++            lastReadingAt = recordedAt
++        }
++        val level = currentLevelPercentage ?: return false
++        return when {
++            level <= criticalLevelPercentage && !lowLevelAlertActive -> {
++                lowLevelAlertActive = true
++                true
++            }
++            level > criticalLevelPercentage + REARM_MARGIN -> {
++                lowLevelAlertActive = false
++                false
++            }
++            else -> false
++        }
++    }
++
++    private fun validate(name: String, capacity: BigDecimal, critical: BigDecimal) {
++        require(name.isNotBlank()) { "The name of the tank is required" }
++        require(capacity.signum() > 0) { "The capacity must be positive" }
++        require(critical > BigDecimal.ZERO && critical < BigDecimal(100)) { "The critical level must be between 0 and 100" }
++    }
++
++    companion object {
++        val REARM_MARGIN = BigDecimal(5)
++    }
++}
++
++/** Level reported by the device of a tank at a moment. */
++data class TankLevelReading(
++    val id: UUID = UUID.randomUUID(),
++    val tankId: UUID,
++    val accountId: UUID,
++    val levelPercentage: BigDecimal,
++    val recordedAt: LocalDateTime
++)
++
++/** Value Object: moment in which a tank is expected to reach its critical level (US30). */
++data class ReplenishmentPrediction(
++    val available: Boolean,
++    val predictedCriticalAt: LocalDateTime? = null,
++    val hoursToCritical: BigDecimal? = null,
++    val consumptionPercentagePerHour: BigDecimal? = null
++) {
++    companion object {
++        val UNAVAILABLE = ReplenishmentPrediction(available = false)
++    }
++}
++
++/** Domain Event: the level of a tank fell below its critical value (US29). */
++data class TankLevelLowEvent(
++    val accountId: UUID,
++    val tankId: UUID,
++    val tankName: String,
++    val levelPercentage: BigDecimal,
++    val criticalLevelPercentage: BigDecimal,
++    val occurredAt: LocalDateTime
++)
+diff --git a/src/main/kotlin/com/wasd/qlic/monitoring/domain/repositories/TankRepositories.kt b/src/main/kotlin/com/wasd/qlic/monitoring/domain/repositories/TankRepositories.kt
+new file mode 100644
+index 0000000..93db8ce
+--- /dev/null
++++ b/src/main/kotlin/com/wasd/qlic/monitoring/domain/repositories/TankRepositories.kt
+@@ -0,0 +1,20 @@
++package com.wasd.qlic.monitoring.domain.repositories
++
++import com.wasd.qlic.monitoring.domain.model.TankLevelReading
++import com.wasd.qlic.monitoring.domain.model.WaterTank
++import java.time.LocalDateTime
++import java.util.UUID
++
++interface WaterTankRepository {
++    fun save(tank: WaterTank): WaterTank
++    fun findById(id: UUID): WaterTank?
++    fun findByAccountId(accountId: UUID): List<WaterTank>
++    fun existsByLocationId(locationId: UUID): Boolean
++    fun delete(tank: WaterTank)
++}
++
++interface TankLevelReadingRepository {
++    fun save(reading: TankLevelReading): TankLevelReading
++    fun findByTankIdBetween(tankId: UUID, from: LocalDateTime, to: LocalDateTime): List<TankLevelReading>
++    fun deleteByTankId(tankId: UUID)
++}
+diff --git a/src/main/kotlin/com/wasd/qlic/monitoring/domain/services/ReplenishmentPredictionService.kt b/src/main/kotlin/com/wasd/qlic/monitoring/domain/services/ReplenishmentPredictionService.kt
+new file mode 100644
+index 0000000..e87fbeb
+--- /dev/null
++++ b/src/main/kotlin/com/wasd/qlic/monitoring/domain/services/ReplenishmentPredictionService.kt
+@@ -0,0 +1,63 @@
++package com.wasd.qlic.monitoring.domain.services
++
++import com.wasd.qlic.monitoring.domain.model.ReplenishmentPrediction
++import com.wasd.qlic.monitoring.domain.model.TankLevelReading
++import com.wasd.qlic.monitoring.domain.model.WaterTank
++import org.springframework.stereotype.Service
++import java.math.BigDecimal
++import java.math.RoundingMode
++import java.time.Duration
++
++/**
++ * ReplenishmentPredictionService (US30): estimates when the tank will reach its critical level from the
++ * consumption pattern since the last refill. The rate is the least-squares slope of the level over time;
++ * it needs at least 3 readings spanning 12 hours with a falling level (Scenario 2 otherwise).
++ */
++@Service
++class ReplenishmentPredictionService {
++
++    fun predict(tank: WaterTank, history: List<TankLevelReading>): ReplenishmentPrediction {
++        val current = tank.currentLevelPercentage ?: return ReplenishmentPrediction.UNAVAILABLE
++        val lastReadingAt = tank.lastReadingAt ?: return ReplenishmentPrediction.UNAVAILABLE
++        val sinceRefill = sinceLastRefill(history.sortedBy { it.recordedAt })
++        if (sinceRefill.size < MIN_READINGS) return ReplenishmentPrediction.UNAVAILABLE
++
++        val start = sinceRefill.first().recordedAt
++        val spanHours = Duration.between(start, sinceRefill.last().recordedAt).toMinutes() / 60.0
++        if (spanHours < MIN_SPAN_HOURS) return ReplenishmentPrediction.UNAVAILABLE
++
++        val xs = sinceRefill.map { Duration.between(start, it.recordedAt).toMinutes() / 60.0 }
++        val ys = sinceRefill.map { it.levelPercentage.toDouble() }
++        val meanX = xs.average()
++        val meanY = ys.average()
++        val denominator = xs.sumOf { (it - meanX) * (it - meanX) }
++        if (denominator == 0.0) return ReplenishmentPrediction.UNAVAILABLE
++        val slope = xs.indices.sumOf { (xs[it] - meanX) * (ys[it] - meanY) } / denominator
++        if (slope >= 0.0) return ReplenishmentPrediction.UNAVAILABLE
++
++        val ratePerHour = -slope
++        val remaining = (current - tank.criticalLevelPercentage).toDouble()
++        val hours = if (remaining <= 0.0) 0.0 else remaining / ratePerHour
++        return ReplenishmentPrediction(
++            available = true,
++            predictedCriticalAt = lastReadingAt.plusMinutes((hours * 60).toLong()),
++            hoursToCritical = BigDecimal(hours).setScale(1, RoundingMode.HALF_UP),
++            consumptionPercentagePerHour = BigDecimal(ratePerHour).setScale(2, RoundingMode.HALF_UP)
++        )
++    }
++
++    /** Readings after the last refill: a rise of more than 5 points restarts the consumption pattern. */
++    private fun sinceLastRefill(readings: List<TankLevelReading>): List<TankLevelReading> {
++        var startIndex = 0
++        for (index in 1 until readings.size) {
++            if (readings[index].levelPercentage - readings[index - 1].levelPercentage > REFILL_THRESHOLD) startIndex = index
++        }
++        return readings.subList(startIndex, readings.size)
++    }
++
++    private companion object {
++        const val MIN_READINGS = 3
++        const val MIN_SPAN_HOURS = 12.0
++        val REFILL_THRESHOLD = BigDecimal(5)
++    }
++}
+diff --git a/src/main/kotlin/com/wasd/qlic/monitoring/infrastructure/persistence/TankPersistence.kt b/src/main/kotlin/com/wasd/qlic/monitoring/infrastructure/persistence/TankPersistence.kt
+new file mode 100644
+index 0000000..01e1ddc
+--- /dev/null
++++ b/src/main/kotlin/com/wasd/qlic/monitoring/infrastructure/persistence/TankPersistence.kt
+@@ -0,0 +1,132 @@
++package com.wasd.qlic.monitoring.infrastructure.persistence
++
++import com.wasd.qlic.monitoring.domain.model.TankLevelReading
++import com.wasd.qlic.monitoring.domain.model.WaterTank
++import com.wasd.qlic.monitoring.domain.repositories.TankLevelReadingRepository
++import com.wasd.qlic.monitoring.domain.repositories.WaterTankRepository
++import jakarta.persistence.Column
++import jakarta.persistence.Entity
++import jakarta.persistence.Id
++import jakarta.persistence.Index
++import jakarta.persistence.Table
++import org.springframework.data.jpa.repository.JpaRepository
++import org.springframework.data.jpa.repository.Modifying
++import org.springframework.data.jpa.repository.Query
++import org.springframework.data.repository.query.Param
++import org.springframework.stereotype.Component
++import org.springframework.stereotype.Repository
++import java.math.BigDecimal
++import java.time.Instant
++import java.time.LocalDateTime
++import java.util.UUID
++
++@Entity
++@Table(name = "water_tanks", indexes = [Index(name = "idx_water_tanks_account", columnList = "account_id")])
++class WaterTankEntity(
++    @Id val id: UUID,
++    @Column(name = "account_id", nullable = false) val accountId: UUID,
++    @Column(name = "location_id", nullable = false) val locationId: UUID,
++    @Column(nullable = false, length = 80) val name: String,
++    @Column(name = "capacity_liters", nullable = false, precision = 12, scale = 2) val capacityLiters: BigDecimal,
++    @Column(name = "critical_level_percentage", nullable = false, precision = 5, scale = 2) val criticalLevelPercentage: BigDecimal,
++    @Column(name = "device_id") val deviceId: UUID?,
++    @Column(name = "current_level_percentage", precision = 5, scale = 2) val currentLevelPercentage: BigDecimal?,
++    @Column(name = "last_reading_at") val lastReadingAt: LocalDateTime?,
++    @Column(name = "low_level_alert_active", nullable = false) val lowLevelAlertActive: Boolean,
++    @Column(name = "created_at", nullable = false) val createdAt: Instant
++)
++
++@Entity
++@Table(
++    name = "tank_level_readings",
++    indexes = [Index(name = "idx_tank_levels_tank_recorded", columnList = "tank_id, recorded_at")]
++)
++class TankLevelReadingEntity(
++    @Id val id: UUID,
++    @Column(name = "tank_id", nullable = false) val tankId: UUID,
++    @Column(name = "account_id", nullable = false) val accountId: UUID,
++    @Column(name = "level_percentage", nullable = false, precision = 5, scale = 2) val levelPercentage: BigDecimal,
++    @Column(name = "recorded_at", nullable = false) val recordedAt: LocalDateTime
++)
++
++@Repository
++interface SpringDataWaterTankRepository : JpaRepository<WaterTankEntity, UUID> {
++    fun findAllByAccountIdOrderByNameAsc(accountId: UUID): List<WaterTankEntity>
++    fun existsByLocationId(locationId: UUID): Boolean
++}
++
++@Repository
++interface SpringDataTankLevelReadingRepository : JpaRepository<TankLevelReadingEntity, UUID> {
++    fun findAllByTankIdAndRecordedAtBetweenOrderByRecordedAtAsc(
++        tankId: UUID, from: LocalDateTime, to: LocalDateTime
++    ): List<TankLevelReadingEntity>
++
++    @Modifying
++    @Query("delete from TankLevelReadingEntity r where r.tankId = :tankId")
++    fun deleteAllByTankId(@Param("tankId") tankId: UUID)
++}
++
++@Component
++class JpaWaterTankRepositoryImpl(
++    private val jpa: SpringDataWaterTankRepository
++) : WaterTankRepository {
++
++    override fun save(tank: WaterTank): WaterTank = toDomain(
++        jpa.save(
++            WaterTankEntity(
++                id = tank.id,
++                accountId = tank.accountId,
++                locationId = tank.locationId,
++                name = tank.name,
++                capacityLiters = tank.capacityLiters,
++                criticalLevelPercentage = tank.criticalLevelPercentage,
++                deviceId = tank.deviceId,
++                currentLevelPercentage = tank.currentLevelPercentage,
++                lastReadingAt = tank.lastReadingAt,
++                lowLevelAlertActive = tank.lowLevelAlertActive,
++                createdAt = tank.createdAt
++            )
++        )
++    )
++
++    override fun findById(id: UUID): WaterTank? = jpa.findById(id).orElse(null)?.let { toDomain(it) }
++
++    override fun findByAccountId(accountId: UUID): List<WaterTank> =
++        jpa.findAllByAccountIdOrderByNameAsc(accountId).map { toDomain(it) }
++
++    override fun existsByLocationId(locationId: UUID): Boolean = jpa.existsByLocationId(locationId)
++
++    override fun delete(tank: WaterTank) = jpa.deleteById(tank.id)
++
++    private fun toDomain(entity: WaterTankEntity) = WaterTank(
++        id = entity.id,
++        accountId = entity.accountId,
++        locationId = entity.locationId,
++        name = entity.name,
++        capacityLiters = entity.capacityLiters,
++        criticalLevelPercentage = entity.criticalLevelPercentage,
++        deviceId = entity.deviceId,
++        currentLevelPercentage = entity.currentLevelPercentage,
++        lastReadingAt = entity.lastReadingAt,
++        lowLevelAlertActive = entity.lowLevelAlertActive,
++        createdAt = entity.createdAt
++    )
++}
++
++@Component
++class JpaTankLevelReadingRepositoryImpl(
++    private val jpa: SpringDataTankLevelReadingRepository
++) : TankLevelReadingRepository {
++
++    override fun save(reading: TankLevelReading): TankLevelReading = toDomain(
++        jpa.save(TankLevelReadingEntity(reading.id, reading.tankId, reading.accountId, reading.levelPercentage, reading.recordedAt))
++    )
++
++    override fun findByTankIdBetween(tankId: UUID, from: LocalDateTime, to: LocalDateTime): List<TankLevelReading> =
++        jpa.findAllByTankIdAndRecordedAtBetweenOrderByRecordedAtAsc(tankId, from, to).map { toDomain(it) }
++
++    override fun deleteByTankId(tankId: UUID) = jpa.deleteAllByTankId(tankId)
++
++    private fun toDomain(entity: TankLevelReadingEntity) =
++        TankLevelReading(entity.id, entity.tankId, entity.accountId, entity.levelPercentage, entity.recordedAt)
++}
+diff --git a/src/main/kotlin/com/wasd/qlic/monitoring/interfaces/rest/WaterTankController.kt b/src/main/kotlin/com/wasd/qlic/monitoring/interfaces/rest/WaterTankController.kt
+new file mode 100644
+index 0000000..e3eae00
+--- /dev/null
++++ b/src/main/kotlin/com/wasd/qlic/monitoring/interfaces/rest/WaterTankController.kt
+@@ -0,0 +1,253 @@
++package com.wasd.qlic.monitoring.interfaces.rest
++
++import com.wasd.qlic.monitoring.application.commands.DeleteWaterTankCommand
++import com.wasd.qlic.monitoring.application.commands.RegisterTankLevelCommand
++import com.wasd.qlic.monitoring.application.commands.SaveWaterTankCommand
++import com.wasd.qlic.monitoring.application.handlers.LocationCommandHandler
++import com.wasd.qlic.monitoring.application.handlers.WaterTankCommandHandler
++import com.wasd.qlic.monitoring.application.queries.GetLocationsQuery
++import com.wasd.qlic.monitoring.application.queries.GetTankLevelsQuery
++import com.wasd.qlic.monitoring.application.queries.GetWaterTankQuery
++import com.wasd.qlic.monitoring.application.queries.GetWaterTanksQuery
++import com.wasd.qlic.monitoring.domain.model.ReplenishmentPrediction
++import com.wasd.qlic.monitoring.domain.model.TankLevelReading
++import com.wasd.qlic.monitoring.domain.model.TankStatus
++import com.wasd.qlic.monitoring.domain.model.WaterTank
++import com.wasd.qlic.shared.interfaces.rest.security.accountId
++import io.swagger.v3.oas.annotations.Operation
++import io.swagger.v3.oas.annotations.Parameter
++import io.swagger.v3.oas.annotations.media.Schema
++import io.swagger.v3.oas.annotations.tags.Tag
++import jakarta.validation.Valid
++import jakarta.validation.constraints.DecimalMax
++import jakarta.validation.constraints.DecimalMin
++import jakarta.validation.constraints.NotBlank
++import jakarta.validation.constraints.NotNull
++import jakarta.validation.constraints.Size
++import org.springframework.format.annotation.DateTimeFormat
++import org.springframework.http.HttpStatus
++import org.springframework.http.ResponseEntity
++import org.springframework.security.core.annotation.AuthenticationPrincipal
++import org.springframework.security.oauth2.jwt.Jwt
++import org.springframework.web.bind.annotation.DeleteMapping
++import org.springframework.web.bind.annotation.GetMapping
++import org.springframework.web.bind.annotation.PathVariable
++import org.springframework.web.bind.annotation.PostMapping
++import org.springframework.web.bind.annotation.PutMapping
++import org.springframework.web.bind.annotation.RequestBody
++import org.springframework.web.bind.annotation.RequestMapping
++import org.springframework.web.bind.annotation.RequestParam
++import org.springframework.web.bind.annotation.RestController
++import java.math.BigDecimal
++import java.time.LocalDate
++import java.time.LocalDateTime
++import java.util.UUID
++
++@Schema(description = "Tank of a location monitored by a device (US28).")
++data class SaveWaterTankResource(
++    @field:NotNull(message = "{validation.tank.location.required}")
++    val locationId: UUID?,
++    @field:NotBlank(message = "{validation.tank.name.required}")
++    @field:Size(max = 80, message = "{validation.name.size}")
++    @field:Schema(example = "Tanque elevado")
++    val name: String?,
++    @field:NotNull(message = "{validation.tank.capacity.required}")
++    @field:DecimalMin(value = "1", message = "{validation.tank.capacity.min}")
++    @field:Schema(example = "1100")
++    val capacityLiters: BigDecimal?,
++    @field:DecimalMin(value = "1", message = "{validation.tank.critical.range}")
++    @field:DecimalMax(value = "99", message = "{validation.tank.critical.range}")
++    @field:Schema(example = "20", defaultValue = "20")
++    val criticalLevelPercentage: BigDecimal? = null,
++    @field:Schema(nullable = true, description = "Device of the account that reports the level")
++    val deviceId: UUID? = null
++)
++
++@Schema(description = "Level reported by the device of the tank. recordedAt defaults to the reception time.")
++data class RegisterTankLevelResource(
++    @field:NotNull(message = "{validation.tank.level.required}")
++    @field:DecimalMin(value = "0", message = "{validation.tank.level.range}")
++    @field:DecimalMax(value = "100", message = "{validation.tank.level.range}")
++    @field:Schema(example = "64.5")
++    val levelPercentage: BigDecimal?,
++    @field:Schema(example = "2026-11-20T08:00:00", nullable = true)
++    val recordedAt: LocalDateTime? = null
++)
++
++@Schema(description = "Moment in which the tank is expected to reach its critical level (US30).")
++data class ReplenishmentPredictionResource(
++    @field:Schema(description = "False while there is not enough history (US30 - Scenario 2)") val available: Boolean,
++    @field:Schema(nullable = true) val predictedCriticalAt: LocalDateTime?,
++    @field:Schema(example = "36.5", nullable = true) val hoursToCritical: BigDecimal?,
++    @field:Schema(example = "1.20", nullable = true) val consumptionPercentagePerHour: BigDecimal?
++)
++
++@Schema(description = "Tank with its current level (US28) and, in the detail, its replenishment prediction (US30).")
++data class WaterTankResource(
++    val id: UUID,
++    val name: String,
++    val locationId: UUID,
++    @field:Schema(nullable = true) val locationName: String?,
++    @field:Schema(example = "1100.00") val capacityLiters: BigDecimal,
++    @field:Schema(example = "20.00") val criticalLevelPercentage: BigDecimal,
++    @field:Schema(nullable = true) val deviceId: UUID?,
++    val status: TankStatus,
++    @field:Schema(example = "64.50", nullable = true) val currentLevelPercentage: BigDecimal?,
++    @field:Schema(example = "709.50", nullable = true) val availableLiters: BigDecimal?,
++    @field:Schema(nullable = true) val lastReadingAt: LocalDateTime?,
++    @field:Schema(nullable = true, description = "Only in the detail of the tank") val prediction: ReplenishmentPredictionResource?
++)
++
++@Schema(description = "Registered level; lowLevelAlertRaised is true when this reading crossed the critical level (US29).")
++data class TankLevelRegistrationResource(
++    val tank: WaterTankResource,
++    @field:Schema(example = "18.00") val levelPercentage: BigDecimal,
++    val recordedAt: LocalDateTime,
++    val lowLevelAlertRaised: Boolean
++)
++
++@Schema(description = "Level of the tank at a moment.")
++data class TankLevelResource(
++    @field:Schema(example = "64.50") val levelPercentage: BigDecimal,
++    val recordedAt: LocalDateTime
++)
++
++@RestController
++@RequestMapping("/api/v1/tanks")
++@Tag(name = "Water Tanks", description = "Device Monitoring - Level of the tanks, low level alert and replenishment prediction")
++class WaterTankController(
++    private val tankHandler: WaterTankCommandHandler,
++    private val locationHandler: LocationCommandHandler
++) {
++
++    @PostMapping
++    @Operation(summary = "Register a tank in a location (US28)")
++    fun create(
++        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
++        @Valid @RequestBody resource: SaveWaterTankResource
++    ): ResponseEntity<WaterTankResource> {
++        val accountId = jwt.accountId()
++        val tank = tankHandler.handle(resource.toCommand(accountId, null))
++        return ResponseEntity.status(HttpStatus.CREATED).body(tank.toResource(locationNames(accountId), null))
++    }
++
++    @GetMapping
++    @Operation(summary = "List the tanks of the account with their current level (US28)")
++    fun list(
++        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
++        @RequestParam(required = false) locationId: UUID?
++    ): ResponseEntity<List<WaterTankResource>> {
++        val accountId = jwt.accountId()
++        val names = locationNames(accountId)
++        return ResponseEntity.ok(tankHandler.handle(GetWaterTanksQuery(accountId, locationId)).map { it.toResource(names, null) })
++    }
++
++    @GetMapping("/{tankId}")
++    @Operation(
++        summary = "Detail of a tank with its replenishment prediction (US28, US30)",
++        description = "Current level, date and time of the last reading and the estimated moment of reaching the critical level."
++    )
++    fun get(
++        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
++        @PathVariable tankId: UUID
++    ): ResponseEntity<WaterTankResource> {
++        val accountId = jwt.accountId()
++        val detail = tankHandler.handle(GetWaterTankQuery(tankId, accountId))
++        return ResponseEntity.ok(detail.tank.toResource(locationNames(accountId), detail.prediction))
++    }
++
++    @PutMapping("/{tankId}")
++    @Operation(summary = "Update the data, critical level or device of a tank")
++    fun update(
++        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
++        @PathVariable tankId: UUID,
++        @Valid @RequestBody resource: SaveWaterTankResource
++    ): ResponseEntity<WaterTankResource> {
++        val accountId = jwt.accountId()
++        val tank = tankHandler.handle(resource.toCommand(accountId, tankId))
++        return ResponseEntity.ok(tank.toResource(locationNames(accountId), null))
++    }
++
++    @DeleteMapping("/{tankId}")
++    @Operation(summary = "Delete a tank and its level history")
++    fun delete(
++        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
++        @PathVariable tankId: UUID
++    ): ResponseEntity<Void> {
++        tankHandler.handle(DeleteWaterTankCommand(tankId, jwt.accountId()))
++        return ResponseEntity.noContent().build()
++    }
++
++    @PostMapping("/{tankId}/levels")
++    @Operation(
++        summary = "Register the level reported by the device of the tank (US28, US29)",
++        description = "When the level falls below the critical value, TankLevelLowEvent is published once and a push " +
++            "notification is sent to the subscriber; the alert is rearmed when the tank is refilled."
++    )
++    fun registerLevel(
++        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
++        @PathVariable tankId: UUID,
++        @Valid @RequestBody resource: RegisterTankLevelResource
++    ): ResponseEntity<TankLevelRegistrationResource> {
++        val accountId = jwt.accountId()
++        val result = tankHandler.handle(
++            RegisterTankLevelCommand(tankId, accountId, requireNotNull(resource.levelPercentage), resource.recordedAt)
++        )
++        return ResponseEntity.status(HttpStatus.CREATED).body(
++            TankLevelRegistrationResource(
++                tank = result.tank.toResource(locationNames(accountId), null),
++                levelPercentage = result.reading.levelPercentage,
++                recordedAt = result.reading.recordedAt,
++                lowLevelAlertRaised = result.lowLevelAlertRaised
++            )
++        )
++    }
++
++    @GetMapping("/{tankId}/levels")
++    @Operation(summary = "Level history of a tank (at most 92 days)")
++    fun levels(
++        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
++        @PathVariable tankId: UUID,
++        @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) @Parameter(example = "2026-11-01") from: LocalDate,
++        @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) @Parameter(example = "2026-11-30") to: LocalDate
++    ): ResponseEntity<List<TankLevelResource>> =
++        ResponseEntity.ok(
++            tankHandler.handle(GetTankLevelsQuery(tankId, jwt.accountId(), from, to)).map { it.toResource() }
++        )
++
++    private fun locationNames(accountId: UUID): Map<UUID, String> =
++        locationHandler.handle(GetLocationsQuery(accountId)).associate { it.id to it.name }
++
++    private fun SaveWaterTankResource.toCommand(accountId: UUID, tankId: UUID?) = SaveWaterTankCommand(
++        accountId = accountId,
++        locationId = requireNotNull(locationId),
++        name = requireNotNull(name),
++        capacityLiters = requireNotNull(capacityLiters),
++        criticalLevelPercentage = criticalLevelPercentage ?: DEFAULT_CRITICAL_LEVEL,
++        deviceId = deviceId,
++        tankId = tankId
++    )
++
++    private fun WaterTank.toResource(locationNames: Map<UUID, String>, prediction: ReplenishmentPrediction?) = WaterTankResource(
++        id = id,
++        name = name,
++        locationId = locationId,
++        locationName = locationNames[locationId],
++        capacityLiters = capacityLiters,
++        criticalLevelPercentage = criticalLevelPercentage,
++        deviceId = deviceId,
++        status = status,
++        currentLevelPercentage = currentLevelPercentage,
++        availableLiters = availableLiters,
++        lastReadingAt = lastReadingAt,
++        prediction = prediction?.let {
++            ReplenishmentPredictionResource(it.available, it.predictedCriticalAt, it.hoursToCritical, it.consumptionPercentagePerHour)
++        }
++    )
++
++    private fun TankLevelReading.toResource() = TankLevelResource(levelPercentage, recordedAt)
++
++    private companion object {
++        val DEFAULT_CRITICAL_LEVEL = BigDecimal(20)
++    }
++}
+diff --git a/src/main/resources/messages.properties b/src/main/resources/messages.properties
+index 4e8dd7f..3d674f7 100644
+--- a/src/main/resources/messages.properties
++++ b/src/main/resources/messages.properties
+@@ -111,3 +111,13 @@ validation.tariff.category.required=The service category is required.
+ validation.tariff.price.min=The price per cubic meter must be positive.
+ validation.goal.reduction.required=The reduction percentage is required.
+ validation.goal.reduction.range=The reduction must be between 1% and 90%.
++monitoring.location.has-tanks=The location still has tanks. Delete them before deleting the location.
++monitoring.tank.not-found=The tank does not exist in your account.
++monitoring.tank.invalid=The data of the tank is not valid: the capacity must be positive and the critical level and the reported level must be between 0 and 100.
++validation.tank.location.required=The location of the tank is required.
++validation.tank.name.required=The name of the tank is required.
++validation.tank.capacity.required=The capacity of the tank is required.
++validation.tank.capacity.min=The capacity must be at least 1 liter.
++validation.tank.critical.range=The critical level must be between 1% and 99%.
++validation.tank.level.required=The level is required.
++validation.tank.level.range=The level must be between 0% and 100%.
+diff --git a/src/main/resources/messages_es_419.properties b/src/main/resources/messages_es_419.properties
+index 4bb9f6e..eda99ec 100644
+--- a/src/main/resources/messages_es_419.properties
++++ b/src/main/resources/messages_es_419.properties
+@@ -111,3 +111,13 @@ validation.tariff.category.required=La categoría de servicio es obligatoria.
+ validation.tariff.price.min=El precio por metro cúbico debe ser positivo.
+ validation.goal.reduction.required=El porcentaje de reducción es obligatorio.
+ validation.goal.reduction.range=La reducción debe estar entre 1% y 90%.
++monitoring.location.has-tanks=El local todavía tiene tanques. Elimínelos antes de eliminar el local.
++monitoring.tank.not-found=El tanque no existe en su cuenta.
++monitoring.tank.invalid=Los datos del tanque no son válidos: la capacidad debe ser positiva y el nivel crítico y el nivel reportado deben estar entre 0 y 100.
++validation.tank.location.required=El local del tanque es obligatorio.
++validation.tank.name.required=El nombre del tanque es obligatorio.
++validation.tank.capacity.required=La capacidad del tanque es obligatoria.
++validation.tank.capacity.min=La capacidad debe ser de al menos 1 litro.
++validation.tank.critical.range=El nivel crítico debe estar entre 1% y 99%.
++validation.tank.level.required=El nivel es obligatorio.
++validation.tank.level.range=El nivel debe estar entre 0% y 100%.
+-- 
+2.43.0
+
+
+From 6d5145d250bfeb9a4f512c171cfc44ae2fdbe7bd Mon Sep 17 00:00:00 2001
+From: AlessandroRCL <alessandro.1901.ramiro@gmail.com>
+Date: Tue, 24 Nov 2026 22:09:10 -0500
+Subject: [PATCH 2/2] test(monitoring): cover tank level, low level alert and
+ replenishment prediction
+
+---
+ .../application/handlers/MonitoringFakes.kt   |  41 ++++++
+ .../handlers/WaterPointCommandHandlerTest.kt  |   2 +-
+ .../handlers/WaterTankCommandHandlerTest.kt   | 118 ++++++++++++++++
+ .../rest/WaterTankIntegrationTest.kt          | 128 ++++++++++++++++++
+ 4 files changed, 288 insertions(+), 1 deletion(-)
+ create mode 100644 src/test/kotlin/com/wasd/qlic/monitoring/application/handlers/WaterTankCommandHandlerTest.kt
+ create mode 100644 src/test/kotlin/com/wasd/qlic/monitoring/interfaces/rest/WaterTankIntegrationTest.kt
+
+diff --git a/src/test/kotlin/com/wasd/qlic/monitoring/application/handlers/MonitoringFakes.kt b/src/test/kotlin/com/wasd/qlic/monitoring/application/handlers/MonitoringFakes.kt
+index b67e85f..a1f098a 100644
+--- a/src/test/kotlin/com/wasd/qlic/monitoring/application/handlers/MonitoringFakes.kt
++++ b/src/test/kotlin/com/wasd/qlic/monitoring/application/handlers/MonitoringFakes.kt
+@@ -3,11 +3,15 @@ package com.wasd.qlic.monitoring.application.handlers
+ import com.wasd.qlic.monitoring.domain.model.ConsumptionReading
+ import com.wasd.qlic.monitoring.domain.model.IoTDevice
+ import com.wasd.qlic.monitoring.domain.model.Location
++import com.wasd.qlic.monitoring.domain.model.TankLevelReading
+ import com.wasd.qlic.monitoring.domain.model.WaterPoint
++import com.wasd.qlic.monitoring.domain.model.WaterTank
+ import com.wasd.qlic.monitoring.domain.repositories.ConsumptionReadingRepository
+ import com.wasd.qlic.monitoring.domain.repositories.IoTDeviceRepository
+ import com.wasd.qlic.monitoring.domain.repositories.LocationRepository
++import com.wasd.qlic.monitoring.domain.repositories.TankLevelReadingRepository
+ import com.wasd.qlic.monitoring.domain.repositories.WaterPointRepository
++import com.wasd.qlic.monitoring.domain.repositories.WaterTankRepository
+ import com.wasd.qlic.monitoring.domain.services.PlanEntitlementProvider
+ import java.time.LocalDateTime
+ import java.util.UUID
+@@ -94,3 +98,40 @@ class InMemoryConsumptionReadingRepository : ConsumptionReadingRepository {
+     override fun findByAccountIdBetween(accountId: UUID, from: LocalDateTime, to: LocalDateTime): List<ConsumptionReading> =
+         storage.filter { it.accountId == accountId && !it.recordedAt.isBefore(from) && !it.recordedAt.isAfter(to) }
+ }
++
++class InMemoryWaterTankRepository : WaterTankRepository {
++    private val storage = mutableMapOf<UUID, WaterTank>()
++
++    override fun save(tank: WaterTank): WaterTank {
++        storage[tank.id] = tank
++        return tank
++    }
++
++    override fun findById(id: UUID): WaterTank? = storage[id]
++
++    override fun findByAccountId(accountId: UUID): List<WaterTank> =
++        storage.values.filter { it.accountId == accountId }.sortedBy { it.name }
++
++    override fun existsByLocationId(locationId: UUID): Boolean = storage.values.any { it.locationId == locationId }
++
++    override fun delete(tank: WaterTank) {
++        storage.remove(tank.id)
++    }
++}
++
++class InMemoryTankLevelReadingRepository : TankLevelReadingRepository {
++    private val storage = mutableListOf<TankLevelReading>()
++
++    override fun save(reading: TankLevelReading): TankLevelReading {
++        storage.add(reading)
++        return reading
++    }
++
++    override fun findByTankIdBetween(tankId: UUID, from: LocalDateTime, to: LocalDateTime): List<TankLevelReading> =
++        storage.filter { it.tankId == tankId && !it.recordedAt.isBefore(from) && !it.recordedAt.isAfter(to) }
++            .sortedBy { it.recordedAt }
++
++    override fun deleteByTankId(tankId: UUID) {
++        storage.removeIf { it.tankId == tankId }
++    }
++}
+diff --git a/src/test/kotlin/com/wasd/qlic/monitoring/application/handlers/WaterPointCommandHandlerTest.kt b/src/test/kotlin/com/wasd/qlic/monitoring/application/handlers/WaterPointCommandHandlerTest.kt
+index 6e6f006..c7ae100 100644
+--- a/src/test/kotlin/com/wasd/qlic/monitoring/application/handlers/WaterPointCommandHandlerTest.kt
++++ b/src/test/kotlin/com/wasd/qlic/monitoring/application/handlers/WaterPointCommandHandlerTest.kt
+@@ -34,7 +34,7 @@ class WaterPointCommandHandlerTest {
+         waterPoints = InMemoryWaterPointRepository()
+         locations = InMemoryLocationRepository()
+         plan = FixedPlanEntitlementProvider(maxWaterPoints = 2)
+-        locationHandler = LocationCommandHandler(locations, waterPoints)
++        locationHandler = LocationCommandHandler(locations, waterPoints, InMemoryWaterTankRepository())
+         waterPointHandler = WaterPointCommandHandler(waterPoints, locations, devices, plan)
+     }
+ 
+diff --git a/src/test/kotlin/com/wasd/qlic/monitoring/application/handlers/WaterTankCommandHandlerTest.kt b/src/test/kotlin/com/wasd/qlic/monitoring/application/handlers/WaterTankCommandHandlerTest.kt
+new file mode 100644
+index 0000000..80eca69
+--- /dev/null
++++ b/src/test/kotlin/com/wasd/qlic/monitoring/application/handlers/WaterTankCommandHandlerTest.kt
+@@ -0,0 +1,118 @@
++package com.wasd.qlic.monitoring.application.handlers
++
++import com.wasd.qlic.monitoring.application.commands.RegisterTankLevelCommand
++import com.wasd.qlic.monitoring.application.commands.SaveWaterTankCommand
++import com.wasd.qlic.monitoring.application.queries.GetWaterTankQuery
++import com.wasd.qlic.monitoring.domain.exceptions.InvalidWaterTankException
++import com.wasd.qlic.monitoring.domain.model.Location
++import com.wasd.qlic.monitoring.domain.model.TankLevelLowEvent
++import com.wasd.qlic.monitoring.domain.model.TankStatus
++import com.wasd.qlic.monitoring.domain.services.ReplenishmentPredictionService
++import org.junit.jupiter.api.Assertions.assertEquals
++import org.junit.jupiter.api.Assertions.assertFalse
++import org.junit.jupiter.api.Assertions.assertThrows
++import org.junit.jupiter.api.Assertions.assertTrue
++import org.junit.jupiter.api.BeforeEach
++import org.junit.jupiter.api.DisplayName
++import org.junit.jupiter.api.Test
++import org.springframework.context.ApplicationEventPublisher
++import java.math.BigDecimal
++import java.time.LocalDateTime
++import java.util.UUID
++
++class WaterTankCommandHandlerTest {
++
++    private val accountId = UUID.randomUUID()
++    private val start = LocalDateTime.of(2026, 11, 18, 8, 0)
++    private val events = mutableListOf<Any>()
++    private lateinit var handler: WaterTankCommandHandler
++    private lateinit var tankId: UUID
++
++    @BeforeEach
++    fun setUp() {
++        val locations = InMemoryLocationRepository()
++        val location = locations.save(Location(accountId = accountId, name = "Casa"))
++        handler = WaterTankCommandHandler(
++            InMemoryWaterTankRepository(),
++            InMemoryTankLevelReadingRepository(),
++            locations,
++            InMemoryIoTDeviceRepository(),
++            ReplenishmentPredictionService(),
++            ApplicationEventPublisher { events.add(it) }
++        )
++        tankId = handler.handle(
++            SaveWaterTankCommand(accountId, location.id, "Tanque elevado", BigDecimal(1000), BigDecimal(20), null)
++        ).id
++    }
++
++    private fun level(value: String, at: LocalDateTime) =
++        handler.handle(RegisterTankLevelCommand(tankId, accountId, BigDecimal(value), at))
++
++    @Test
++    @DisplayName("US28 - Scenario 1: the current level, the available liters and the last reading are kept")
++    fun shouldKeepCurrentLevel() {
++        level("80", start)
++        val result = level("64.5", start.plusHours(2))
++
++        assertEquals(BigDecimal("64.5"), result.tank.currentLevelPercentage)
++        assertEquals(BigDecimal("645.00"), result.tank.availableLiters)
++        assertEquals(start.plusHours(2), result.tank.lastReadingAt)
++        assertEquals(TankStatus.NORMAL, result.tank.status)
++    }
++
++    @Test
++    @DisplayName("US29 - Scenario 1: crossing the critical level publishes TankLevelLowEvent only once until refilled")
++    fun shouldRaiseLowLevelOnce() {
++        level("40", start)
++        assertTrue(level("18", start.plusHours(1)).lowLevelAlertRaised)
++        assertFalse(level("15", start.plusHours(2)).lowLevelAlertRaised)
++        assertFalse(level("90", start.plusHours(3)).lowLevelAlertRaised)
++        assertTrue(level("19", start.plusHours(10)).lowLevelAlertRaised)
++
++        val lowEvents = events.filterIsInstance<TankLevelLowEvent>()
++        assertEquals(2, lowEvents.size)
++        assertEquals("Tanque elevado", lowEvents[0].tankName)
++        assertEquals(BigDecimal("18"), lowEvents[0].levelPercentage)
++    }
++
++    @Test
++    @DisplayName("US30 - Scenario 1: with a falling level the moment of reaching the critical level is predicted")
++    fun shouldPredictReplenishment() {
++        level("100", start)
++        level("85", start.plusHours(12))
++        level("70", start.plusHours(24))
++
++        val prediction = handler.handle(GetWaterTankQuery(tankId, accountId)).prediction
++
++        assertTrue(prediction.available)
++        assertEquals(BigDecimal("1.25"), prediction.consumptionPercentagePerHour)
++        assertEquals(BigDecimal("40.0"), prediction.hoursToCritical)
++        assertEquals(start.plusHours(64), prediction.predictedCriticalAt)
++    }
++
++    @Test
++    @DisplayName("US30 - Scenario 2: without enough history the prediction is not available")
++    fun shouldNotPredictWithoutHistory() {
++        level("100", start)
++        level("95", start.plusHours(2))
++
++        assertFalse(handler.handle(GetWaterTankQuery(tankId, accountId)).prediction.available)
++    }
++
++    @Test
++    @DisplayName("A refill restarts the consumption pattern used by the prediction")
++    fun shouldIgnoreReadingsBeforeRefill() {
++        level("60", start)
++        level("30", start.plusHours(12))
++        level("100", start.plusHours(13))
++        level("95", start.plusHours(20))
++
++        assertFalse(handler.handle(GetWaterTankQuery(tankId, accountId)).prediction.available)
++    }
++
++    @Test
++    @DisplayName("A level outside 0-100 is rejected")
++    fun shouldRejectInvalidLevel() {
++        assertThrows(InvalidWaterTankException::class.java) { level("120", start) }
++    }
++}
+diff --git a/src/test/kotlin/com/wasd/qlic/monitoring/interfaces/rest/WaterTankIntegrationTest.kt b/src/test/kotlin/com/wasd/qlic/monitoring/interfaces/rest/WaterTankIntegrationTest.kt
+new file mode 100644
+index 0000000..028c082
+--- /dev/null
++++ b/src/test/kotlin/com/wasd/qlic/monitoring/interfaces/rest/WaterTankIntegrationTest.kt
+@@ -0,0 +1,128 @@
++package com.wasd.qlic.monitoring.interfaces.rest
++
++import org.hamcrest.Matchers.startsWith
++import org.junit.jupiter.api.BeforeEach
++import org.junit.jupiter.api.DisplayName
++import org.junit.jupiter.api.Test
++import org.springframework.beans.factory.annotation.Autowired
++import org.springframework.boot.test.context.SpringBootTest
++import org.springframework.http.MediaType
++import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity
++import org.springframework.test.web.servlet.MockMvc
++import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
++import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
++import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
++import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
++import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
++import org.springframework.test.web.servlet.setup.DefaultMockMvcBuilder
++import org.springframework.test.web.servlet.setup.MockMvcBuilders
++import org.springframework.web.context.WebApplicationContext
++
++/** US28, US29, US30: tank level, low level alert and replenishment prediction through the API. */
++@SpringBootTest
++class WaterTankIntegrationTest {
++
++    @Autowired
++    private lateinit var context: WebApplicationContext
++
++    private lateinit var mockMvc: MockMvc
++
++    @BeforeEach
++    fun setUp() {
++        mockMvc = MockMvcBuilders.webAppContextSetup(context).apply<DefaultMockMvcBuilder>(springSecurity()).build()
++    }
++
++    private fun field(json: String, name: String): String =
++        Regex("\"$name\"\\s*:\\s*\"([^\"]+)\"").find(json)!!.groupValues[1]
++
++    private fun create(auth: String, path: String, json: String): String = field(
++        mockMvc.perform(post(path).header("Authorization", auth).contentType(MediaType.APPLICATION_JSON).content(json))
++            .andExpect(status().isCreated).andReturn().response.contentAsString,
++        "id"
++    )
++
++    private fun bearerFor(email: String): String {
++        mockMvc.perform(
++            post("/api/v1/authentication/sign-up").contentType(MediaType.APPLICATION_JSON)
++                .content("""{"fullName":"Elena Quispe","email":"$email","password":"Qlic2026!","acceptTerms":true}""")
++        ).andExpect(status().isCreated)
++        return "Bearer " + field(
++            mockMvc.perform(
++                post("/api/v1/authentication/sign-in").contentType(MediaType.APPLICATION_JSON)
++                    .content("""{"email":"$email","password":"Qlic2026!"}""")
++            ).andExpect(status().isOk).andReturn().response.contentAsString,
++            "token"
++        )
++    }
++
++    private fun level(auth: String, tank: String, level: String, at: String) = mockMvc.perform(
++        post("/api/v1/tanks/$tank/levels").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
++            .content("""{"levelPercentage":$level,"recordedAt":"$at"}""")
++    )
++
++    @Test
++    @DisplayName("Tank level, single low level alert and replenishment prediction")
++    fun tankLifecycle() {
++        val auth = bearerFor("it.tanks@example.com")
++        val location = create(auth, "/api/v1/locations", """{"name":"Casa Quispe"}""")
++        val tank = create(auth, "/api/v1/tanks", """{"locationId":"$location","name":"Tanque elevado","capacityLiters":1100}""")
++
++        // US30 - Scenario 2: no history yet
++        mockMvc.perform(get("/api/v1/tanks/$tank").header("Authorization", auth))
++            .andExpect(status().isOk)
++            .andExpect(jsonPath("$.status").value("NO_DATA"))
++            .andExpect(jsonPath("$.criticalLevelPercentage").value(20.0))
++            .andExpect(jsonPath("$.prediction.available").value(false))
++
++        level(auth, tank, "100", "2026-11-18T08:00:00").andExpect(status().isCreated)
++        level(auth, tank, "85", "2026-11-18T20:00:00").andExpect(status().isCreated)
++        level(auth, tank, "70", "2026-11-19T08:00:00")
++            .andExpect(status().isCreated)
++            .andExpect(jsonPath("$.lowLevelAlertRaised").value(false))
++
++        // US28 - Scenario 1 and US30 - Scenario 1
++        mockMvc.perform(get("/api/v1/tanks/$tank").header("Authorization", auth))
++            .andExpect(status().isOk)
++            .andExpect(jsonPath("$.currentLevelPercentage").value(70.0))
++            .andExpect(jsonPath("$.availableLiters").value(770.0))
++            .andExpect(jsonPath("$.lastReadingAt").value(startsWith("2026-11-19T08:00")))
++            .andExpect(jsonPath("$.locationName").value("Casa Quispe"))
++            .andExpect(jsonPath("$.prediction.available").value(true))
++            .andExpect(jsonPath("$.prediction.hoursToCritical").value(40.0))
++            .andExpect(jsonPath("$.prediction.predictedCriticalAt").value(startsWith("2026-11-21T00:00")))
++
++        // US29 - Scenario 1: the alert is raised once when crossing the critical level
++        level(auth, tank, "18", "2026-11-20T10:00:00")
++            .andExpect(jsonPath("$.lowLevelAlertRaised").value(true))
++            .andExpect(jsonPath("$.tank.status").value("LOW"))
++        level(auth, tank, "12", "2026-11-20T14:00:00")
++            .andExpect(jsonPath("$.lowLevelAlertRaised").value(false))
++
++        mockMvc.perform(
++            get("/api/v1/tanks/$tank/levels").header("Authorization", auth).param("from", "2026-11-18").param("to", "2026-11-20")
++        )
++            .andExpect(status().isOk)
++            .andExpect(jsonPath("$.length()").value(5))
++
++        mockMvc.perform(delete("/api/v1/locations/$location").header("Authorization", auth))
++            .andExpect(status().isConflict)
++            .andExpect(jsonPath("$.code").value("monitoring.location.has-tanks"))
++
++        level(auth, tank, "130", "2026-11-20T15:00:00")
++            .andExpect(status().isBadRequest)
++    }
++
++    @Test
++    @DisplayName("A tank cannot be read by another account")
++    fun tanksAreIsolatedByAccount() {
++        val owner = bearerFor("it.tanks.owner@example.com")
++        val other = bearerFor("it.tanks.other@example.com")
++        val location = create(owner, "/api/v1/locations", """{"name":"Casa"}""")
++        val tank = create(owner, "/api/v1/tanks", """{"locationId":"$location","name":"Cisterna","capacityLiters":2500}""")
++
++        mockMvc.perform(get("/api/v1/tanks/$tank").header("Authorization", other))
++            .andExpect(status().isNotFound)
++            .andExpect(jsonPath("$.code").value("monitoring.tank.not-found"))
++        level(other, tank, "50", "2026-11-20T10:00:00").andExpect(status().isNotFound)
++    }
++}
+-- 
+2.43.0
+
