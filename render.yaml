@@ -45,3 +45,5 @@ services:
         generateValue: true
       - key: PASSWORD_RESET_EXPOSE_TOKEN
         value: "true"
+      - key: FIREBASE_CREDENTIALS_BASE64
+        sync: false

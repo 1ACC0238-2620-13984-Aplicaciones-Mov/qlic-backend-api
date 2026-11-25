@@ -8,4 +8,5 @@ import java.util.UUID
 interface SpringDataIoTDeviceRepository : JpaRepository<IoTDeviceEntity, UUID> {
     fun findBySerialNumber(serialNumber: String): IoTDeviceEntity?
     fun findByAccountId(accountId: UUID): List<IoTDeviceEntity>
+    fun existsByWaterPointId(waterPointId: UUID): Boolean
 }
