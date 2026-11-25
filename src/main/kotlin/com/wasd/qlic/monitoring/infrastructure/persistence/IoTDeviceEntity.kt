@@ -23,6 +23,9 @@ class IoTDeviceEntity(
     @Column(name = "account_id", nullable = false)
     val accountId: UUID,
 
+    @Column(name = "name", length = 60)
+    var name: String? = null,
+
     @Column(name = "water_point_id")
     var waterPointId: UUID? = null,
 

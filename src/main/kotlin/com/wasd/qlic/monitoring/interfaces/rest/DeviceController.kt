@@ -3,12 +3,14 @@ package com.wasd.qlic.monitoring.interfaces.rest
 import com.wasd.qlic.monitoring.application.commands.AssignWaterPointCommand
 import com.wasd.qlic.monitoring.application.commands.DeleteDeviceCommand
 import com.wasd.qlic.monitoring.application.commands.RegisterDeviceCommand
+import com.wasd.qlic.monitoring.application.commands.UpdateDeviceCommand
 import com.wasd.qlic.monitoring.application.handlers.DeviceCommandHandler
 import com.wasd.qlic.monitoring.application.queries.GetDeviceByIdQuery
 import com.wasd.qlic.monitoring.application.queries.GetDevicesByAccountQuery
 import com.wasd.qlic.monitoring.interfaces.rest.resources.AssignWaterPointRequest
 import com.wasd.qlic.monitoring.interfaces.rest.resources.IoTDeviceResource
 import com.wasd.qlic.monitoring.interfaces.rest.resources.RegisterDeviceRequest
+import com.wasd.qlic.monitoring.interfaces.rest.resources.UpdateDeviceRequest
 import com.wasd.qlic.monitoring.interfaces.rest.resources.toResource
 import com.wasd.qlic.shared.interfaces.rest.security.accountId
 import io.swagger.v3.oas.annotations.Operation
@@ -79,6 +81,23 @@ class DeviceController(
         @PathVariable id: UUID
     ): ResponseEntity<IoTDeviceResource> =
         ResponseEntity.ok(deviceCommandHandler.handleGetById(GetDeviceByIdQuery(id, jwt.accountId())).toResource())
+
+    @PutMapping("/{id}")
+    @Operation(
+        summary = "Update the name and the Water Point of a device (TS02)",
+        description = "Full replacement of the editable data: name (null or blank removes it, up to 60 characters) and " +
+            "waterPointId (null unassigns the device). The serial number and the model cannot change."
+    )
+    fun updateDevice(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
+        @PathVariable id: UUID,
+        @RequestBody request: UpdateDeviceRequest
+    ): ResponseEntity<IoTDeviceResource> =
+        ResponseEntity.ok(
+            deviceCommandHandler.handleUpdate(
+                UpdateDeviceCommand(deviceId = id, accountId = jwt.accountId(), name = request.name, waterPointId = request.waterPointId)
+            ).toResource()
+        )
 
     @DeleteMapping("/{id}")
     @Operation(summary = "Unlink a device from the account; its readings are kept for the reports")

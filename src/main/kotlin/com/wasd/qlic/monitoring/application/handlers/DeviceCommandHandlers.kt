@@ -3,6 +3,7 @@ package com.wasd.qlic.monitoring.application.handlers
 import com.wasd.qlic.monitoring.application.commands.AssignWaterPointCommand
 import com.wasd.qlic.monitoring.application.commands.DeleteDeviceCommand
 import com.wasd.qlic.monitoring.application.commands.RegisterDeviceCommand
+import com.wasd.qlic.monitoring.application.commands.UpdateDeviceCommand
 import com.wasd.qlic.monitoring.application.queries.GetDeviceByIdQuery
 import com.wasd.qlic.monitoring.application.queries.GetDevicesByAccountQuery
 import com.wasd.qlic.monitoring.domain.exceptions.DeviceAlreadyRegisteredException
@@ -52,6 +53,25 @@ class DeviceCommandHandler(
         waterPointRepository.findById(command.waterPointId)?.takeIf { it.accountId == command.accountId }
             ?: throw WaterPointNotFoundException()
         device.assignWaterPoint(command.waterPointId)
+        return deviceRepository.save(device)
+    }
+
+    /**
+     * TS02: renames the device and assigns it to a Water Point of the account, or unassigns it when
+     * waterPointId is null. The readings already registered keep their original Water Point.
+     */
+    @Transactional
+    fun handleUpdate(command: UpdateDeviceCommand): IoTDevice {
+        val device = ownedDevice(command.deviceId, command.accountId)
+        device.rename(command.name)
+        val waterPointId = command.waterPointId
+        if (waterPointId == null) {
+            device.unassignWaterPoint()
+        } else {
+            waterPointRepository.findById(waterPointId)?.takeIf { it.accountId == command.accountId }
+                ?: throw WaterPointNotFoundException()
+            device.assignWaterPoint(waterPointId)
+        }
         return deviceRepository.save(device)
     }
 
