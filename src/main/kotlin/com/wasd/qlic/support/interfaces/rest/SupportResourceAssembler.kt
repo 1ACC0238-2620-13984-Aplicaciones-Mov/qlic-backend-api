@@ -1,7 +1,9 @@
 package com.wasd.qlic.support.interfaces.rest
 
 import com.wasd.qlic.support.domain.model.Incident
+import com.wasd.qlic.support.domain.model.IncidentStatusChange
 import com.wasd.qlic.support.interfaces.rest.resources.IncidentResource
+import com.wasd.qlic.support.interfaces.rest.resources.IncidentStatusChangeResource
 import com.wasd.qlic.support.interfaces.rest.resources.TechnicalVisitResource
 
 /** Transforms the Incident aggregate into its REST representation. */
@@ -32,4 +34,12 @@ fun Incident.toResource() = IncidentResource(
     },
     resolution = resolution?.description,
     resolvedAt = resolution?.resolvedAt
+)
+
+fun IncidentStatusChange.toResource() = IncidentStatusChangeResource(
+    id = id,
+    fromState = fromState?.name,
+    toState = toState.name,
+    occurredAt = occurredAt,
+    detail = detail
 )

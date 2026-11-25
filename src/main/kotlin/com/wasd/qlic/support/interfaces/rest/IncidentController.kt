@@ -10,6 +10,7 @@ import com.wasd.qlic.support.application.handlers.SupportQueryHandler
 import com.wasd.qlic.support.application.queries.GetIncidentByIdQuery
 import com.wasd.qlic.support.application.queries.GetIncidentsByAccountQuery
 import com.wasd.qlic.support.interfaces.rest.resources.IncidentResource
+import com.wasd.qlic.support.interfaces.rest.resources.IncidentStatusChangeResource
 import com.wasd.qlic.support.interfaces.rest.resources.RegisterIncidentResource
 import com.wasd.qlic.support.interfaces.rest.resources.RequestTechnicalVisitResource
 import io.swagger.v3.oas.annotations.Operation
@@ -94,6 +95,27 @@ class IncidentController(
         @PathVariable incidentId: UUID
     ): ResponseEntity<IncidentResource> =
         ResponseEntity.ok(supportQueryHandler.handle(GetIncidentByIdQuery(incidentId, jwt.accountId())).toResource())
+
+    @GetMapping("/{incidentId}/history")
+    @Operation(
+        summary = "Follow the status history of an incident (US37)",
+        description = "Every state the incident went through, oldest first: registration (PENDING), visit requested with the " +
+            "preferred date, technician assigned with the scheduled date (IN_PROGRESS) and resolution."
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Status history of the incident"),
+        ApiResponse(
+            responseCode = "404", description = "The incident does not belong to the account",
+            content = [Content(schema = Schema(implementation = ProblemDetail::class))]
+        )
+    )
+    fun getIncidentHistory(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
+        @PathVariable incidentId: UUID
+    ): ResponseEntity<List<IncidentStatusChangeResource>> =
+        ResponseEntity.ok(
+            supportQueryHandler.handle(GetIncidentByIdQuery(incidentId, jwt.accountId())).history.map { it.toResource() }
+        )
 
     @PostMapping("/{incidentId}/technical-visit")
     @Operation(

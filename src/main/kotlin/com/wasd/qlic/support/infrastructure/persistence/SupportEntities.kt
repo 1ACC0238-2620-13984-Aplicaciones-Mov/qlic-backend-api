@@ -46,6 +46,18 @@ class IncidentEntity(
     @Column(name = "resolved_at") var resolvedAt: Instant? = null
 )
 
+/** Persistence of the status history of an incident (US37). */
+@Entity
+@Table(name = "incident_status_changes")
+class IncidentStatusChangeEntity(
+    @Id val id: UUID,
+    @Column(name = "incident_id", nullable = false) val incidentId: UUID,
+    @Enumerated(EnumType.STRING) @Column(name = "from_state", length = 20) val fromState: IncidentState?,
+    @Enumerated(EnumType.STRING) @Column(name = "to_state", nullable = false, length = 20) val toState: IncidentState,
+    @Column(name = "occurred_at", nullable = false) val occurredAt: Instant,
+    @Column(length = 500) val detail: String?
+)
+
 @Entity
 @Table(name = "technicians")
 class TechnicianEntity(

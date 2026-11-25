@@ -3,6 +3,7 @@ package com.wasd.qlic.support.infrastructure.persistence
 import com.wasd.qlic.support.domain.model.AvailabilityWindow
 import com.wasd.qlic.support.domain.model.Incident
 import com.wasd.qlic.support.domain.model.IncidentState
+import com.wasd.qlic.support.domain.model.IncidentStatusChange
 import com.wasd.qlic.support.domain.model.Resolution
 import com.wasd.qlic.support.domain.model.TechnicalVisit
 import com.wasd.qlic.support.domain.model.Technician
@@ -22,6 +23,11 @@ interface SpringDataIncidentRepository : JpaRepository<IncidentEntity, UUID> {
 }
 
 @Repository
+interface SpringDataIncidentStatusChangeRepository : JpaRepository<IncidentStatusChangeEntity, UUID> {
+    fun findAllByIncidentIdOrderByOccurredAtAsc(incidentId: UUID): List<IncidentStatusChangeEntity>
+}
+
+@Repository
 interface SpringDataTechnicianRepository : JpaRepository<TechnicianEntity, UUID> {
     fun findAllByActiveTrue(): List<TechnicianEntity>
 }
@@ -33,10 +39,15 @@ interface SpringDataTermsOfServiceRepository : JpaRepository<TermsOfServiceEntit
 
 @Component
 class JpaIncidentRepositoryImpl(
-    private val jpa: SpringDataIncidentRepository
+    private val jpa: SpringDataIncidentRepository,
+    private val statusChanges: SpringDataIncidentStatusChangeRepository
 ) : IncidentRepository {
 
-    override fun save(incident: Incident): Incident = toDomain(jpa.save(toEntity(incident)))
+    override fun save(incident: Incident): Incident {
+        val saved = jpa.save(toEntity(incident))
+        statusChanges.saveAll(incident.history.map { it.toEntity(incident.id) })
+        return toDomain(saved)
+    }
 
     override fun findById(id: UUID): Incident? = jpa.findById(id).orElse(null)?.let { toDomain(it) }
 
@@ -102,9 +113,35 @@ class JpaIncidentRepositoryImpl(
             technicalVisit = visit,
             resolution = resolution,
             registeredAt = entity.registeredAt,
-            updatedAt = entity.updatedAt
+            updatedAt = entity.updatedAt,
+            statusHistory = historyOf(entity)
         )
     }
+
+    /**
+     * Incidents registered before the history existed have no rows: their history is rebuilt from the
+     * registration date and, when the state already changed, the last update.
+     */
+    private fun historyOf(entity: IncidentEntity): List<IncidentStatusChange> {
+        val stored = statusChanges.findAllByIncidentIdOrderByOccurredAtAsc(entity.id).map {
+            IncidentStatusChange(id = it.id, fromState = it.fromState, toState = it.toState, occurredAt = it.occurredAt, detail = it.detail)
+        }
+        if (stored.isNotEmpty()) return stored
+        val created = IncidentStatusChange(fromState = null, toState = IncidentState.PENDING, occurredAt = entity.registeredAt)
+        if (entity.state == IncidentState.PENDING) return listOf(created)
+        return listOf(
+            created,
+            IncidentStatusChange(
+                fromState = IncidentState.PENDING,
+                toState = entity.state,
+                occurredAt = entity.updatedAt,
+                detail = entity.resolutionDescription
+            )
+        )
+    }
+
+    private fun IncidentStatusChange.toEntity(incidentId: UUID) =
+        IncidentStatusChangeEntity(id, incidentId, fromState, toState, occurredAt, detail)
 }
 
 @Component

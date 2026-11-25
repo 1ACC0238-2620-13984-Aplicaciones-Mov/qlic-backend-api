@@ -109,3 +109,19 @@ data class TermsOfServiceResource(
     val content: String,
     @field:Schema(description = "Date of the last update", example = "2026-11-10") val updatedOn: LocalDate
 )
+
+/** One step of the attention cycle of an incident (US37). */
+data class IncidentStatusChangeResource(
+    val id: UUID,
+    @field:Schema(description = "Previous state; null for the registration", example = "PENDING", nullable = true)
+    val fromState: String?,
+    @field:Schema(description = "PENDING, VISIT_REQUESTED, IN_PROGRESS or RESOLVED", example = "VISIT_REQUESTED")
+    val toState: String,
+    @field:Schema(description = "When the change happened (UTC)", example = "2026-11-20T15:30:00Z")
+    val occurredAt: Instant,
+    @field:Schema(
+        description = "Preferred visit date, technician and scheduled date, or resolution, depending on the new state",
+        example = "2026-11-22", nullable = true
+    )
+    val detail: String?
+)
