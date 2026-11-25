@@ -4,12 +4,32 @@ import java.math.BigDecimal
 import java.time.LocalDateTime
 import java.util.UUID
 
-enum class PlanType(val monthlyPriceSoles: BigDecimal, val maxWaterPoints: Int) {
-    TRIAL(BigDecimal("0.00"), 2),
-    HOME_BASIC(BigDecimal("29.90"), 3),
-    HOME_PRO(BigDecimal("49.90"), 6),
-    PYME_BUSINESS(BigDecimal("99.90"), 15),
-    PYME_ENTERPRISE(BigDecimal("199.90"), 50)
+/** Customer segment a plan is designed for (TS07). */
+enum class PlanSegment {
+    TRIAL,
+    HOME,
+    BUSINESS
+}
+
+/**
+ * Value Object: catalog of plans (TS07). It is the single source of the price, the billing period and
+ * the limits that the other bounded contexts read through their anti-corruption layers.
+ */
+enum class PlanType(
+    val monthlyPriceSoles: BigDecimal,
+    val maxWaterPoints: Int,
+    val maxAuthorizedUsers: Int,
+    val billingPeriodDays: Long,
+    val segment: PlanSegment
+) {
+    TRIAL(BigDecimal("0.00"), 2, 1, 14L, PlanSegment.TRIAL),
+    HOME_BASIC(BigDecimal("29.90"), 3, 1, 30L, PlanSegment.HOME),
+    HOME_PRO(BigDecimal("49.90"), 6, 3, 30L, PlanSegment.HOME),
+    PYME_BUSINESS(BigDecimal("99.90"), 15, 5, 30L, PlanSegment.BUSINESS),
+    PYME_ENTERPRISE(BigDecimal("199.90"), 50, 10, 30L, PlanSegment.BUSINESS);
+
+    /** The trial is started with POST /subscriptions/trial; every other plan can be purchased. */
+    val purchasable: Boolean get() = this != TRIAL
 }
 
 enum class SubscriptionStatus {
