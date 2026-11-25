@@ -8,4 +8,6 @@ interface IoTDeviceRepository {
     fun findById(id: UUID): IoTDevice?
     fun findBySerialNumber(serialNumber: String): IoTDevice?
     fun findByAccountId(accountId: UUID): List<IoTDevice>
+    fun existsByWaterPointId(waterPointId: UUID): Boolean
+    fun delete(device: IoTDevice)
 }

@@ -38,6 +38,11 @@ class JpaIoTDeviceRepositoryImpl(
         return jpaRepository.findByAccountId(accountId).map { toDomain(it) }
     }
 
+    override fun existsByWaterPointId(waterPointId: UUID): Boolean =
+        jpaRepository.existsByWaterPointId(waterPointId)
+
+    override fun delete(device: IoTDevice) = jpaRepository.deleteById(device.id)
+
     private fun toDomain(entity: IoTDeviceEntity): IoTDevice {
         return IoTDevice(
             id = entity.id,

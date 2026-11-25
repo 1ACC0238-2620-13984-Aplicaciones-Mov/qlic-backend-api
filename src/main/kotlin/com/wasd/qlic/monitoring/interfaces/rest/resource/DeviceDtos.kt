@@ -33,7 +33,7 @@ fun IoTDevice.toResource() = IoTDeviceResource(
     model = model,
     accountId = accountId,
     waterPointId = waterPointId,
-    status = status,
+    status = effectiveStatus(),
     batteryPercentage = batteryPercentage,
     lastSyncAt = lastSyncAt
 )

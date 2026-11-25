@@ -5,8 +5,9 @@ import java.time.LocalDateTime
 import java.util.UUID
 
 /**
- * Entity: volume of water measured by an IoT device for its Water Point at a moment.
- * The readings feed the reports of Consumption Analytics (US24).
+ * Entity: volume of water measured by an IoT device for its Water Point at a moment, with the flow
+ * and pressure of the line when the device reports them. The readings feed the monitoring dashboard
+ * and the reports of Consumption Analytics.
  */
 class ConsumptionReading(
     val id: UUID = UUID.randomUUID(),
@@ -14,9 +15,13 @@ class ConsumptionReading(
     val deviceId: UUID,
     val waterPointId: UUID,
     val volumeLiters: BigDecimal,
-    val recordedAt: LocalDateTime = LocalDateTime.now()
+    val recordedAt: LocalDateTime = LocalDateTime.now(),
+    val flowRateLitersPerMinute: BigDecimal? = null,
+    val pressureBar: BigDecimal? = null
 ) {
     init {
         require(volumeLiters.signum() >= 0) { "The volume cannot be negative" }
+        require(flowRateLitersPerMinute == null || flowRateLitersPerMinute.signum() >= 0) { "The flow cannot be negative" }
+        require(pressureBar == null || pressureBar.signum() >= 0) { "The pressure cannot be negative" }
     }
 }
