@@ -25,7 +25,9 @@ class ConsumptionReadingEntity(
     @Column(name = "device_id", nullable = false) val deviceId: UUID,
     @Column(name = "water_point_id", nullable = false) val waterPointId: UUID,
     @Column(name = "volume_liters", nullable = false, precision = 12, scale = 3) val volumeLiters: BigDecimal,
-    @Column(name = "recorded_at", nullable = false) val recordedAt: LocalDateTime
+    @Column(name = "recorded_at", nullable = false) val recordedAt: LocalDateTime,
+    @Column(name = "flow_rate_lpm", precision = 10, scale = 3) val flowRateLitersPerMinute: BigDecimal? = null,
+    @Column(name = "pressure_bar", precision = 8, scale = 3) val pressureBar: BigDecimal? = null
 )
 
 @Repository
@@ -41,7 +43,8 @@ class JpaConsumptionReadingRepositoryImpl(
     override fun save(reading: ConsumptionReading): ConsumptionReading = toDomain(
         jpa.save(
             ConsumptionReadingEntity(
-                reading.id, reading.accountId, reading.deviceId, reading.waterPointId, reading.volumeLiters, reading.recordedAt
+                reading.id, reading.accountId, reading.deviceId, reading.waterPointId, reading.volumeLiters, reading.recordedAt,
+                reading.flowRateLitersPerMinute, reading.pressureBar
             )
         )
     )
@@ -55,6 +58,8 @@ class JpaConsumptionReadingRepositoryImpl(
         deviceId = entity.deviceId,
         waterPointId = entity.waterPointId,
         volumeLiters = entity.volumeLiters,
-        recordedAt = entity.recordedAt
+        recordedAt = entity.recordedAt,
+        flowRateLitersPerMinute = entity.flowRateLitersPerMinute,
+        pressureBar = entity.pressureBar
     )
 }

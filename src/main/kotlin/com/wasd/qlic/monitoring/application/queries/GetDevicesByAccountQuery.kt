@@ -25,3 +25,10 @@ data class GetReadingsByPeriodQuery(
     val locationId: UUID? = null,
     val waterPointId: UUID? = null
 )
+
+/** Consolidated monitoring dashboard of the account, optionally of one location. */
+data class GetMonitoringDashboardQuery(
+    val accountId: UUID,
+    val locationId: UUID? = null,
+    val now: java.time.LocalDateTime = java.time.LocalDateTime.now()
+)

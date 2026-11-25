@@ -12,6 +12,8 @@ import io.swagger.v3.oas.annotations.media.Schema
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
 import jakarta.validation.constraints.DecimalMin
+import jakarta.validation.constraints.Max
+import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.NotNull
 import org.springframework.http.HttpStatus
 import org.springframework.format.annotation.DateTimeFormat
@@ -29,7 +31,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
 
-@Schema(description = "Consumption reading sent by a device. recordedAt defaults to the reception time.")
+@Schema(description = "Consumption reading sent by a device. recordedAt defaults to the reception time; flow, pressure and battery are optional telemetry.")
 data class RegisterConsumptionReadingResource(
     @field:NotNull(message = "{validation.reading.device.required}")
     val deviceId: UUID?,
@@ -40,7 +42,20 @@ data class RegisterConsumptionReadingResource(
     val volumeLiters: BigDecimal?,
 
     @field:Schema(example = "2026-11-08T23:15:00", nullable = true)
-    val recordedAt: LocalDateTime? = null
+    val recordedAt: LocalDateTime? = null,
+
+    @field:DecimalMin(value = "0.0", message = "{validation.reading.flow.min}")
+    @field:Schema(example = "8.4", nullable = true, description = "Instant flow of the line in liters per minute")
+    val flowRateLitersPerMinute: BigDecimal? = null,
+
+    @field:DecimalMin(value = "0.0", message = "{validation.reading.pressure.min}")
+    @field:Schema(example = "2.1", nullable = true, description = "Pressure of the line in bar")
+    val pressureBar: BigDecimal? = null,
+
+    @field:Min(value = 0, message = "{validation.reading.battery.range}")
+    @field:Max(value = 100, message = "{validation.reading.battery.range}")
+    @field:Schema(example = "87", nullable = true)
+    val batteryPercentage: Int? = null
 )
 
 @Schema(description = "Registered consumption reading.")
@@ -49,7 +64,9 @@ data class ConsumptionReadingResource(
     val deviceId: UUID,
     val waterPointId: UUID,
     val volumeLiters: BigDecimal,
-    val recordedAt: LocalDateTime
+    val recordedAt: LocalDateTime,
+    val flowRateLitersPerMinute: BigDecimal?,
+    val pressureBar: BigDecimal?
 )
 
 @RestController
@@ -74,7 +91,10 @@ class ConsumptionReadingController(
                 accountId = jwt.accountId(),
                 deviceId = requireNotNull(resource.deviceId),
                 volumeLiters = requireNotNull(resource.volumeLiters),
-                recordedAt = resource.recordedAt
+                recordedAt = resource.recordedAt,
+                flowRateLitersPerMinute = resource.flowRateLitersPerMinute,
+                pressureBar = resource.pressureBar,
+                batteryPercentage = resource.batteryPercentage
             )
         )
         return ResponseEntity.status(HttpStatus.CREATED).body(reading.toResource())
@@ -99,5 +119,5 @@ class ConsumptionReadingController(
         )
 
     private fun ConsumptionReading.toResource() =
-        ConsumptionReadingResource(id, deviceId, waterPointId, volumeLiters, recordedAt)
+        ConsumptionReadingResource(id, deviceId, waterPointId, volumeLiters, recordedAt, flowRateLitersPerMinute, pressureBar)
 }
