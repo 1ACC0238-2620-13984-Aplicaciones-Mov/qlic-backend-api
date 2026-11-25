@@ -32,3 +32,12 @@ data class GetMonitoringDashboardQuery(
     val locationId: UUID? = null,
     val now: java.time.LocalDateTime = java.time.LocalDateTime.now()
 )
+
+/** US28: tanks of the account, optionally of one location. */
+data class GetWaterTanksQuery(val accountId: UUID, val locationId: UUID? = null)
+
+/** US28, US30: detail of a tank with its replenishment prediction. */
+data class GetWaterTankQuery(val tankId: UUID, val accountId: UUID)
+
+/** Level history of a tank in a period. */
+data class GetTankLevelsQuery(val tankId: UUID, val accountId: UUID, val from: LocalDate, val to: LocalDate)

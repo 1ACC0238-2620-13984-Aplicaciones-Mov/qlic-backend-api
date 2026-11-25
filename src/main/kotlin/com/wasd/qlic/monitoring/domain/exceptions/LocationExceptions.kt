@@ -22,3 +22,6 @@ class WaterPointLimitReachedException(limit: Int) :
 
 /** The name is blank or too long. */
 class InvalidLocationDataException : DomainException("monitoring.location.invalid")
+
+/** A location with tanks cannot be deleted; they must be deleted first. */
+class LocationHasTanksException : BusinessConflictException("monitoring.location.has-tanks")

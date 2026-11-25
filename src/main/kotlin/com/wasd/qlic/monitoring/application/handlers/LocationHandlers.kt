@@ -11,6 +11,7 @@ import com.wasd.qlic.monitoring.application.queries.GetLocationsQuery
 import com.wasd.qlic.monitoring.application.queries.GetWaterPointByIdQuery
 import com.wasd.qlic.monitoring.application.queries.GetWaterPointsQuery
 import com.wasd.qlic.monitoring.domain.exceptions.InvalidLocationDataException
+import com.wasd.qlic.monitoring.domain.exceptions.LocationHasTanksException
 import com.wasd.qlic.monitoring.domain.exceptions.LocationHasWaterPointsException
 import com.wasd.qlic.monitoring.domain.exceptions.LocationNotFoundException
 import com.wasd.qlic.monitoring.domain.exceptions.WaterPointHasDevicesException
@@ -21,6 +22,7 @@ import com.wasd.qlic.monitoring.domain.model.WaterPoint
 import com.wasd.qlic.monitoring.domain.repositories.IoTDeviceRepository
 import com.wasd.qlic.monitoring.domain.repositories.LocationRepository
 import com.wasd.qlic.monitoring.domain.repositories.WaterPointRepository
+import com.wasd.qlic.monitoring.domain.repositories.WaterTankRepository
 import com.wasd.qlic.monitoring.domain.services.PlanEntitlementProvider
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
@@ -30,7 +32,8 @@ import java.util.UUID
 @Component
 class LocationCommandHandler(
     private val locationRepository: LocationRepository,
-    private val waterPointRepository: WaterPointRepository
+    private val waterPointRepository: WaterPointRepository,
+    private val tankRepository: WaterTankRepository
 ) {
     @Transactional
     fun handle(command: CreateLocationCommand): Location =
@@ -47,6 +50,7 @@ class LocationCommandHandler(
     fun handle(command: DeleteLocationCommand) {
         val location = ownedLocation(locationRepository, command.locationId, command.accountId)
         if (waterPointRepository.existsByLocationId(location.id)) throw LocationHasWaterPointsException()
+        if (tankRepository.existsByLocationId(location.id)) throw LocationHasTanksException()
         locationRepository.delete(location)
     }
 
