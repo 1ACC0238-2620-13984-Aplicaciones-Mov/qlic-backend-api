@@ -1,7 +1,10 @@
 package com.wasd.qlic.monitoring.interfaces.rest
 
 import com.wasd.qlic.monitoring.application.commands.RegisterConsumptionReadingCommand
+import com.wasd.qlic.monitoring.application.handlers.ReadingQueryHandler
 import com.wasd.qlic.monitoring.application.handlers.RegisterConsumptionReadingCommandHandler
+import com.wasd.qlic.monitoring.application.queries.GetReadingsByPeriodQuery
+import com.wasd.qlic.monitoring.domain.model.ConsumptionReading
 import com.wasd.qlic.shared.interfaces.rest.security.accountId
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
@@ -11,14 +14,18 @@ import jakarta.validation.Valid
 import jakarta.validation.constraints.DecimalMin
 import jakarta.validation.constraints.NotNull
 import org.springframework.http.HttpStatus
+import org.springframework.format.annotation.DateTimeFormat
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.security.oauth2.jwt.Jwt
+import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import java.math.BigDecimal
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
 
@@ -47,9 +54,10 @@ data class ConsumptionReadingResource(
 
 @RestController
 @RequestMapping("/api/v1/consumption-readings")
-@Tag(name = "Consumption Readings", description = "Device Monitoring - Ingestion of the consumption readings of the devices")
+@Tag(name = "Consumption Readings", description = "Device Monitoring - Ingestion and history of the consumption readings of the devices")
 class ConsumptionReadingController(
-    private val handler: RegisterConsumptionReadingCommandHandler
+    private val handler: RegisterConsumptionReadingCommandHandler,
+    private val readingQueryHandler: ReadingQueryHandler
 ) {
 
     @PostMapping
@@ -69,8 +77,27 @@ class ConsumptionReadingController(
                 recordedAt = resource.recordedAt
             )
         )
-        return ResponseEntity.status(HttpStatus.CREATED).body(
-            ConsumptionReadingResource(reading.id, reading.deviceId, reading.waterPointId, reading.volumeLiters, reading.recordedAt)
-        )
+        return ResponseEntity.status(HttpStatus.CREATED).body(reading.toResource())
     }
+
+    @GetMapping
+    @Operation(
+        summary = "Readings history of a period (US13 - Scenario 1)",
+        description = "Most recent first. Filter by locationId to get only the readings of one location, or by waterPointId. " +
+            "The period cannot exceed 92 days."
+    )
+    fun history(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
+        @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) @Parameter(example = "2026-11-01") from: LocalDate,
+        @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) @Parameter(example = "2026-11-30") to: LocalDate,
+        @RequestParam(required = false) locationId: UUID?,
+        @RequestParam(required = false) waterPointId: UUID?
+    ): ResponseEntity<List<ConsumptionReadingResource>> =
+        ResponseEntity.ok(
+            readingQueryHandler.handle(GetReadingsByPeriodQuery(jwt.accountId(), from, to, locationId, waterPointId))
+                .map { it.toResource() }
+        )
+
+    private fun ConsumptionReading.toResource() =
+        ConsumptionReadingResource(id, deviceId, waterPointId, volumeLiters, recordedAt)
 }

@@ -1,8 +1,10 @@
 package com.wasd.qlic.monitoring.interfaces.rest
 
 import com.wasd.qlic.monitoring.application.commands.AssignWaterPointCommand
+import com.wasd.qlic.monitoring.application.commands.DeleteDeviceCommand
 import com.wasd.qlic.monitoring.application.commands.RegisterDeviceCommand
 import com.wasd.qlic.monitoring.application.handlers.DeviceCommandHandler
+import com.wasd.qlic.monitoring.application.queries.GetDeviceByIdQuery
 import com.wasd.qlic.monitoring.application.queries.GetDevicesByAccountQuery
 import com.wasd.qlic.monitoring.interfaces.rest.resources.AssignWaterPointRequest
 import com.wasd.qlic.monitoring.interfaces.rest.resources.IoTDeviceResource
@@ -58,11 +60,33 @@ class DeviceController(
     }
 
     @GetMapping
-    @Operation(summary = "List the devices of the account and their status (US12)")
+    @Operation(
+        summary = "List the devices of the account and their status (US12)",
+        description = "With locationId only the devices assigned to the Water Points of that location are returned (US13)."
+    )
     fun getDevicesByAccount(
-        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
+        @RequestParam(required = false) locationId: UUID?
     ): ResponseEntity<List<IoTDeviceResource>> =
         ResponseEntity.ok(
-            deviceCommandHandler.handleGetByAccount(GetDevicesByAccountQuery(jwt.accountId())).map { it.toResource() }
+            deviceCommandHandler.handleGetByAccount(GetDevicesByAccountQuery(jwt.accountId(), locationId)).map { it.toResource() }
         )
+
+    @GetMapping("/{id}")
+    @Operation(summary = "Get a device of the account and its status (US12)")
+    fun getDevice(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
+        @PathVariable id: UUID
+    ): ResponseEntity<IoTDeviceResource> =
+        ResponseEntity.ok(deviceCommandHandler.handleGetById(GetDeviceByIdQuery(id, jwt.accountId())).toResource())
+
+    @DeleteMapping("/{id}")
+    @Operation(summary = "Unlink a device from the account; its readings are kept for the reports")
+    fun deleteDevice(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
+        @PathVariable id: UUID
+    ): ResponseEntity<Void> {
+        deviceCommandHandler.handleDelete(DeleteDeviceCommand(id, jwt.accountId()))
+        return ResponseEntity.noContent().build()
+    }
 }

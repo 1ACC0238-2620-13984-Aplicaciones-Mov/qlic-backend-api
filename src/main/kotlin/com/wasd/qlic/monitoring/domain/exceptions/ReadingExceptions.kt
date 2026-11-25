@@ -1,6 +1,7 @@
 package com.wasd.qlic.monitoring.domain.exceptions
 
 import com.wasd.qlic.shared.domain.exceptions.BusinessConflictException
+import com.wasd.qlic.shared.domain.exceptions.DomainException
 import com.wasd.qlic.shared.domain.exceptions.ResourceNotFoundException
 
 /** The device does not exist in the account of the session. */
@@ -8,3 +9,6 @@ class ReadingDeviceNotFoundException : ResourceNotFoundException("monitoring.dev
 
 /** Readings are recorded per Water Point, so the device must be assigned to one first (US11). */
 class DeviceWithoutWaterPointException : BusinessConflictException("monitoring.device.without-water-point")
+
+/** The period of the readings history is not valid: the start is after the end or it exceeds 92 days. */
+class InvalidReadingPeriodException : DomainException("monitoring.reading.period.invalid")

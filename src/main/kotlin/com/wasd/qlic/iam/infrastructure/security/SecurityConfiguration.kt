@@ -110,6 +110,8 @@ class SecurityConfiguration(
         /** Resources of the account whose configuration a VIEWER cannot modify (US08 - Scenario 2). */
         private val WRITE_PROTECTED_ENDPOINTS = arrayOf(
             "/api/v1/devices/**",
+            "/api/v1/locations/**",
+            "/api/v1/water-points/**",
             "/api/v1/alerts/**",
             "/api/v1/consumption/**",
             "/api/v1/consumption-readings/**",
