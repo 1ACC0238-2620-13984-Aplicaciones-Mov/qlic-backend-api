@@ -109,7 +109,12 @@ class ConsumptionAnalyticsController(
         ResponseEntity.ok(assembler.toResource(tariffHandler.handle(GetTariffQuery(jwt.accountId()))))
 
     @PutMapping("/tariff")
-    @Operation(summary = "Set the service category and, optionally, the own price per cubic meter (US23)")
+    @Operation(
+        summary = "Set the service category and, optionally, the own price per cubic meter (US23)",
+        description = "Sets the category (DOMESTIC or COMMERCIAL) used for the estimated cost. With " +
+            "customPricePerCubicMeter the account uses its own price; without it, the reference price of the " +
+            "category applies."
+    )
     fun defineTariff(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @Valid @RequestBody resource: DefineTariffResource

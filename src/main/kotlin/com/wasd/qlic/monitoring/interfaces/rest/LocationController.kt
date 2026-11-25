@@ -44,7 +44,11 @@ class LocationController(
 ) {
 
     @PostMapping
-    @Operation(summary = "Register a location of the account (US13)")
+    @Operation(
+        summary = "Register a location of the account (US13)",
+        description = "Creates a premises or home of the account, used to group Water Points, devices and tanks. The name " +
+            "is required (up to 80 characters); the address is optional."
+    )
     @ApiResponses(
         ApiResponse(responseCode = "201", description = "Location registered"),
         ApiResponse(
@@ -63,7 +67,11 @@ class LocationController(
     }
 
     @GetMapping
-    @Operation(summary = "List the locations of the account with their number of Water Points (US13)")
+    @Operation(
+        summary = "List the locations of the account with their number of Water Points (US13)",
+        description = "Returns every location of the account with the number of Water Points it groups, so the app can show " +
+            "the selector of locations."
+    )
     fun list(@Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt): ResponseEntity<List<LocationResource>> {
         val accountId = jwt.accountId()
         val countByLocation = waterPointHandler.handle(GetWaterPointsQuery(accountId)).groupingBy { it.locationId }.eachCount()
@@ -73,7 +81,10 @@ class LocationController(
     }
 
     @GetMapping("/{locationId}")
-    @Operation(summary = "Get a location of the account")
+    @Operation(
+        summary = "Get a location of the account",
+        description = "Returns the location with its number of Water Points. A location of another account returns 404."
+    )
     fun get(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @PathVariable locationId: UUID
@@ -85,7 +96,11 @@ class LocationController(
     }
 
     @PutMapping("/{locationId}")
-    @Operation(summary = "Rename a location or change its address")
+    @Operation(
+        summary = "Rename a location or change its address",
+        description = "Full replacement of the name and the address of the location. The Water Points, devices and tanks " +
+            "keep belonging to it."
+    )
     fun update(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @PathVariable locationId: UUID,
@@ -100,7 +115,11 @@ class LocationController(
     }
 
     @DeleteMapping("/{locationId}")
-    @Operation(summary = "Delete a location without Water Points")
+    @Operation(
+        summary = "Delete a location without Water Points",
+        description = "Deletes the location and answers 204. When it still has Water Points or tanks it returns 409 and " +
+            "nothing is deleted."
+    )
     @ApiResponses(
         ApiResponse(responseCode = "204", description = "Location deleted"),
         ApiResponse(

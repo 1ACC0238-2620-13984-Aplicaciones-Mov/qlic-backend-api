@@ -16,3 +16,14 @@ data class AssignWaterPointCommand(
     val waterPointId: UUID,
     val accountId: UUID
 )
+
+/**
+ * TS02: updates the editable data of a device of the account of the session. A null waterPointId
+ * unassigns the device; a blank name removes it.
+ */
+data class UpdateDeviceCommand(
+    val deviceId: UUID,
+    val accountId: UUID,
+    val name: String?,
+    val waterPointId: UUID?
+)

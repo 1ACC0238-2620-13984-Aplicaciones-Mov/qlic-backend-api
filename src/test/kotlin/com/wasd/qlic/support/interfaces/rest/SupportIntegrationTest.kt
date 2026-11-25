@@ -101,5 +101,18 @@ class SupportIntegrationTest {
             .andExpect(status().isOk)
             .andExpect(jsonPath("$[0].id").value(incidentId))
             .andExpect(jsonPath("$[0].state").value("IN_PROGRESS"))
+
+        mockMvc.perform(get("/api/v1/incidents/$incidentId/history").header("Authorization", auth))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.length()").value(3))
+            .andExpect(jsonPath("$[0].fromState").doesNotExist())
+            .andExpect(jsonPath("$[0].toState").value("PENDING"))
+            .andExpect(jsonPath("$[1].toState").value("VISIT_REQUESTED"))
+            .andExpect(jsonPath("$[1].detail").value(date.toString()))
+            .andExpect(jsonPath("$[2].fromState").value("VISIT_REQUESTED"))
+            .andExpect(jsonPath("$[2].toState").value("IN_PROGRESS"))
+
+        mockMvc.perform(get("/api/v1/incidents/7c9e6679-7425-40de-944b-e07fc1f90ae7/history").header("Authorization", auth))
+            .andExpect(status().isNotFound)
     }
 }

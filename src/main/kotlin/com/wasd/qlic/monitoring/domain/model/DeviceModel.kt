@@ -16,6 +16,7 @@ class IoTDevice(
     val model: String,
     val qrCodePayload: String,
     val accountId: UUID,
+    var name: String? = null,
     var waterPointId: UUID? = null,
     var status: DeviceStatus = DeviceStatus.ONLINE,
     var batteryPercentage: Int = 100,
@@ -23,6 +24,18 @@ class IoTDevice(
 ) {
     fun assignWaterPoint(waterPointId: UUID) {
         this.waterPointId = waterPointId
+    }
+
+    /** TS02: the device stops measuring any Water Point until it is assigned again. */
+    fun unassignWaterPoint() {
+        this.waterPointId = null
+    }
+
+    /** TS02: friendly name shown in the apps; blank removes it and the serial number is shown instead. */
+    fun rename(newName: String?) {
+        val trimmed = newName?.trim()?.takeIf { it.isNotEmpty() }
+        require(trimmed == null || trimmed.length <= MAX_NAME_LENGTH) { "The device name cannot exceed $MAX_NAME_LENGTH characters" }
+        this.name = trimmed
     }
 
     /**
@@ -55,5 +68,6 @@ class IoTDevice(
     companion object {
         const val LOW_BATTERY_THRESHOLD = 15
         const val DISCONNECTION_LIMIT_MINUTES = 60L
+        const val MAX_NAME_LENGTH = 60
     }
 }
