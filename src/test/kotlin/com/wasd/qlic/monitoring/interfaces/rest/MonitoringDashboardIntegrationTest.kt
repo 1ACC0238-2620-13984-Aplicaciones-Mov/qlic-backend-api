@@ -1,5 +1,6 @@
 package com.wasd.qlic.monitoring.interfaces.rest
 
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
@@ -11,6 +12,7 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.DefaultMockMvcBuilder
@@ -92,5 +94,28 @@ class MonitoringDashboardIntegrationTest {
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.status").value("LOW_BATTERY"))
             .andExpect(jsonPath("$.batteryPercentage").value(10))
+
+        val first = mockMvc.perform(get("/api/v1/monitoring/dashboard").header("Authorization", auth))
+            .andExpect(status().isOk)
+            .andExpect(header().exists("ETag"))
+            .andExpect(header().exists("Last-Modified"))
+            .andExpect(jsonPath("$.lastReadingAt").exists())
+            .andReturn().response
+        val eTag = first.getHeader("ETag")!!
+
+        mockMvc.perform(get("/api/v1/monitoring/dashboard").header("Authorization", auth).header("If-None-Match", eTag))
+            .andExpect(status().isNotModified)
+            .andExpect(header().string("ETag", eTag))
+
+        mockMvc.perform(
+            post("/api/v1/consumption-readings").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+                .content("""{"deviceId":"$device","volumeLiters":12,"flowRateLitersPerMinute":6.0,"pressureBar":2.1,"batteryPercentage":80}""")
+        ).andExpect(status().isCreated)
+
+        val changed = mockMvc.perform(get("/api/v1/monitoring/dashboard").header("Authorization", auth).header("If-None-Match", eTag))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.todayLiters").value(42.0))
+            .andReturn().response
+        assertNotEquals(eTag, changed.getHeader("ETag"))
     }
 }
