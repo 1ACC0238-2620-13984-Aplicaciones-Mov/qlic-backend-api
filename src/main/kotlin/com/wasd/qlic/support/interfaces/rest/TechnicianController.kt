@@ -35,7 +35,11 @@ class TechnicianController(
 ) {
 
     @GetMapping("/api/v1/technicians")
-    @Operation(summary = "List the active support technicians")
+    @Operation(
+        summary = "List the active support technicians",
+        description = "Returns the technicians that can be assigned to a technical visit, with their phone and service " +
+            "zone."
+    )
     fun getTechnicians(): ResponseEntity<List<TechnicianResource>> =
         ResponseEntity.ok(
             supportQueryHandler.activeTechnicians().map { TechnicianResource(it.id, it.fullName, it.phone, it.zone) }

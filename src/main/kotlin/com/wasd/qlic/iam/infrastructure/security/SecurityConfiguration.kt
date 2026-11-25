@@ -100,6 +100,7 @@ class SecurityConfiguration(
         private val PUBLIC_ENDPOINTS = arrayOf(
             "/api/v1/authentication/**",
             "/api/v1/terms-of-service/**",
+            "/api/v1/plans/**",
             "/v3/api-docs/**",
             "/swagger-ui/**",
             "/swagger-ui.html",

@@ -89,12 +89,20 @@ class NotificationController(
     }
 
     @GetMapping("/device-tokens")
-    @Operation(summary = "List the devices of the account registered for push notifications")
+    @Operation(
+        summary = "List the devices of the account registered for push notifications",
+        description = "Returns the mobile devices registered with POST /device-tokens, showing only the end of each token, " +
+            "whether it is still active and when it was last used."
+    )
     fun tokens(@Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt): ResponseEntity<List<DeviceTokenResource>> =
         ResponseEntity.ok(pushService.tokens(jwt.accountId()).map { it.toResource() })
 
     @DeleteMapping("/device-tokens")
-    @Operation(summary = "Stop sending push notifications to a device (for example, on sign-out)")
+    @Operation(
+        summary = "Stop sending push notifications to a device (for example, on sign-out)",
+        description = "Unregisters the token sent in the query parameter token and answers 204. Call it when the user signs " +
+            "out of the app."
+    )
     fun unregisterToken(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @RequestParam token: String
@@ -119,7 +127,11 @@ class NotificationController(
     }
 
     @GetMapping("/deliveries")
-    @Operation(summary = "Latest push delivery attempts of the account (TS06 - Scenario 1)")
+    @Operation(
+        summary = "Latest push delivery attempts of the account (TS06 - Scenario 1)",
+        description = "Returns the latest delivery attempts with their category, title, result (SENT, INVALID_TOKEN, FAILED " +
+            "or DISABLED when Firebase is not configured) and provider message id."
+    )
     fun deliveries(@Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt): ResponseEntity<List<PushDeliveryResource>> =
         ResponseEntity.ok(pushService.deliveries(jwt.accountId()).map { it.toResource() })
 

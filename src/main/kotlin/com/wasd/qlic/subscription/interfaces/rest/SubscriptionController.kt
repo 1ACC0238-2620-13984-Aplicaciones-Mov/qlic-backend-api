@@ -91,7 +91,12 @@ class SubscriptionController(
     )
 
     @PostMapping
-    @Operation(summary = "Purchase a subscription plan (US31)")
+    @Operation(
+        summary = "Purchase a subscription plan (US31)",
+        description = "Activates a paid plan for 30 days and registers the payment. Answers 201 when the payment is " +
+            "confirmed and 402 when it is rejected (use simulatePaymentRejected=true to test it); in that case " +
+            "the subscription is not activated. The plans are listed in GET /api/v1/plans."
+    )
     fun purchaseSubscription(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @RequestBody req: PurchaseSubscriptionRequest
@@ -119,7 +124,11 @@ class SubscriptionController(
     }
 
     @PostMapping("/trial")
-    @Operation(summary = "Start the free trial, once per subscriber (US32)")
+    @Operation(
+        summary = "Start the free trial, once per subscriber (US32)",
+        description = "Starts the 14-day TRIAL plan, which enables up to 2 Water Points. The trial is granted only once per " +
+            "subscriber; a second request returns 409."
+    )
     fun startFreeTrial(@Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt): ResponseEntity<Any> {
         return try {
             val sub = handler.startFreeTrial(StartTrialCommand(jwt.accountId()))
@@ -130,7 +139,12 @@ class SubscriptionController(
     }
 
     @GetMapping("/current")
-    @Operation(summary = "Get the current subscription of the account and its features (US32)")
+    @Operation(
+        summary = "Get the current subscription of the account and its features (US32)",
+        description = "Returns the plan, status, end of the current period and whether the paid features are enabled. A " +
+            "trial that ended without a purchased plan is shown as TRIAL_EXPIRED. Returns 404 when the account " +
+            "never had a subscription."
+    )
     fun getCurrentSubscription(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt
     ): ResponseEntity<SubscriptionResource> {
@@ -140,7 +154,11 @@ class SubscriptionController(
     }
 
     @PatchMapping("/{subscriptionId}/plan")
-    @Operation(summary = "Change the plan from the next billing period (US33)")
+    @Operation(
+        summary = "Change the plan from the next billing period (US33)",
+        description = "Schedules the new plan in nextBillingPlan; the current plan stays until the end of the paid period. " +
+            "Only an ACTIVE subscription can change plan and it cannot change to TRIAL."
+    )
     fun changePlan(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @PathVariable subscriptionId: UUID,
@@ -151,7 +169,11 @@ class SubscriptionController(
     }
 
     @PostMapping("/{subscriptionId}/cancel")
-    @Operation(summary = "Cancel the subscription keeping access until the end of the paid period (US33)")
+    @Operation(
+        summary = "Cancel the subscription keeping access until the end of the paid period (US33)",
+        description = "Turns off the automatic renewal: the status becomes CANCELLED_PENDING_EXPIRATION and the features " +
+            "stay enabled until currentPeriodEndsAt. No new payments are made."
+    )
     fun cancelSubscription(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @PathVariable subscriptionId: UUID
@@ -161,7 +183,11 @@ class SubscriptionController(
     }
 
     @GetMapping("/payments")
-    @Operation(summary = "List the payment history of the account (US34)")
+    @Operation(
+        summary = "List the payment history of the account (US34)",
+        description = "Returns every payment attempt of the account with the plan, amount in soles, method, status " +
+            "(CONFIRMED or REJECTED) and date."
+    )
     fun getPaymentHistory(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt
     ): ResponseEntity<List<PaymentRecordResource>> {

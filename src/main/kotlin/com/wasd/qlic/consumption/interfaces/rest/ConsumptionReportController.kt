@@ -68,7 +68,12 @@ class ConsumptionReportController(
     }
 
     @GetMapping("/activity-schedule")
-    @Operation(summary = "Get the activity schedule of the premises (US24)")
+    @Operation(
+        summary = "Get the activity schedule of the premises (US24)",
+        description = "Returns the opening and closing time and the active days declared for the premises. Consumption " +
+            "outside this schedule is reported as consumption without activity. Returns 404 while it has not been " +
+            "declared."
+    )
     @ApiResponses(
         ApiResponse(responseCode = "200", description = "Declared schedule"),
         ApiResponse(

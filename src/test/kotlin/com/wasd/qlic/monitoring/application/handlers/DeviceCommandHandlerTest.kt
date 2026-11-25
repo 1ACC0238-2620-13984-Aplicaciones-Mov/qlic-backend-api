@@ -2,6 +2,7 @@ package com.wasd.qlic.monitoring.application.handlers
 
 import com.wasd.qlic.monitoring.application.commands.AssignWaterPointCommand
 import com.wasd.qlic.monitoring.application.commands.RegisterDeviceCommand
+import com.wasd.qlic.monitoring.application.commands.UpdateDeviceCommand
 import com.wasd.qlic.monitoring.domain.exceptions.DeviceAlreadyRegisteredException
 import com.wasd.qlic.monitoring.domain.exceptions.DeviceNotFoundException
 import com.wasd.qlic.monitoring.domain.model.DeviceStatus
@@ -133,5 +134,56 @@ class DeviceCommandHandlerTest {
 
         assertEquals(listOf("SN-006"), result.map { it.serialNumber })
         assertEquals(2, handler.handleGetByAccount(GetDevicesByAccountQuery(accountId)).size)
+    }
+
+    @Test
+    @DisplayName("TS02: updating a device renames it and moves it to another Water Point of the account")
+    fun shouldRenameAndReassignDevice() {
+        val accountId = UUID.randomUUID()
+        val device = fakeRepository.save(
+            IoTDevice(serialNumber = "SN-008", model = "FlowMeter", qrCodePayload = "QR-TEST-008", accountId = accountId)
+                .also { it.assignWaterPoint(waterPointOf(accountId).id) }
+        )
+        val garden = waterPointOf(accountId)
+
+        val updated = handler.handleUpdate(UpdateDeviceCommand(device.id, accountId, "  Medidor jardín  ", garden.id))
+
+        assertEquals("Medidor jardín", updated.name)
+        assertEquals(garden.id, updated.waterPointId)
+        assertEquals("SN-008", updated.serialNumber)
+    }
+
+    @Test
+    @DisplayName("TS02: a null Water Point unassigns the device and a blank name removes it")
+    fun shouldUnassignDeviceAndClearName() {
+        val accountId = UUID.randomUUID()
+        val device = fakeRepository.save(
+            IoTDevice(serialNumber = "SN-009", model = "FlowMeter", qrCodePayload = "QR-TEST-009", accountId = accountId, name = "Cocina")
+                .also { it.assignWaterPoint(waterPointOf(accountId).id) }
+        )
+
+        val updated = handler.handleUpdate(UpdateDeviceCommand(device.id, accountId, " ", null))
+
+        assertNull(updated.name)
+        assertNull(updated.waterPointId)
+    }
+
+    @Test
+    @DisplayName("TS02: a device of another account or a name over 60 characters is rejected")
+    fun shouldRejectInvalidUpdates() {
+        val accountId = UUID.randomUUID()
+        val device = fakeRepository.save(
+            IoTDevice(serialNumber = "SN-010", model = "FlowMeter", qrCodePayload = "QR-TEST-010", accountId = accountId)
+        )
+
+        assertThrows(DeviceNotFoundException::class.java) {
+            handler.handleUpdate(UpdateDeviceCommand(device.id, UUID.randomUUID(), "Cocina", null))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            handler.handleUpdate(UpdateDeviceCommand(device.id, accountId, "x".repeat(61), null))
+        }
+        assertThrows(WaterPointNotFoundException::class.java) {
+            handler.handleUpdate(UpdateDeviceCommand(device.id, accountId, "Cocina", waterPointOf(UUID.randomUUID()).id))
+        }
     }
 }

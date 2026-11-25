@@ -73,7 +73,7 @@ class SubscriptionCommandHandler(
             status = SubscriptionStatus.ACTIVE,
             trialUsed = existing?.trialUsed ?: false,
             startedAt = now,
-            currentPeriodEndsAt = now.plusDays(30),
+            currentPeriodEndsAt = now.plusDays(command.plan.billingPeriodDays),
             autoRenew = true,
             updatedAt = now
         )
@@ -112,7 +112,7 @@ class SubscriptionCommandHandler(
             status = SubscriptionStatus.TRIAL_ACTIVE,
             trialUsed = true,
             startedAt = now,
-            currentPeriodEndsAt = now.plusDays(14),
+            currentPeriodEndsAt = now.plusDays(PlanType.TRIAL.billingPeriodDays),
             autoRenew = false,
             updatedAt = now
         )
