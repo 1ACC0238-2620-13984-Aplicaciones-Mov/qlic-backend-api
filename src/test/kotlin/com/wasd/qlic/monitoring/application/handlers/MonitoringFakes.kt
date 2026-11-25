@@ -1,12 +1,15 @@
 package com.wasd.qlic.monitoring.application.handlers
 
+import com.wasd.qlic.monitoring.domain.model.ConsumptionReading
 import com.wasd.qlic.monitoring.domain.model.IoTDevice
 import com.wasd.qlic.monitoring.domain.model.Location
 import com.wasd.qlic.monitoring.domain.model.WaterPoint
+import com.wasd.qlic.monitoring.domain.repositories.ConsumptionReadingRepository
 import com.wasd.qlic.monitoring.domain.repositories.IoTDeviceRepository
 import com.wasd.qlic.monitoring.domain.repositories.LocationRepository
 import com.wasd.qlic.monitoring.domain.repositories.WaterPointRepository
 import com.wasd.qlic.monitoring.domain.services.PlanEntitlementProvider
+import java.time.LocalDateTime
 import java.util.UUID
 
 class InMemoryIoTDeviceRepository : IoTDeviceRepository {
@@ -78,4 +81,16 @@ class InMemoryWaterPointRepository : WaterPointRepository {
 
 class FixedPlanEntitlementProvider(var maxWaterPoints: Int = 2) : PlanEntitlementProvider {
     override fun maxWaterPoints(accountId: UUID): Int = maxWaterPoints
+}
+
+class InMemoryConsumptionReadingRepository : ConsumptionReadingRepository {
+    private val storage = mutableListOf<ConsumptionReading>()
+
+    override fun save(reading: ConsumptionReading): ConsumptionReading {
+        storage.add(reading)
+        return reading
+    }
+
+    override fun findByAccountIdBetween(accountId: UUID, from: LocalDateTime, to: LocalDateTime): List<ConsumptionReading> =
+        storage.filter { it.accountId == accountId && !it.recordedAt.isBefore(from) && !it.recordedAt.isAfter(to) }
 }
