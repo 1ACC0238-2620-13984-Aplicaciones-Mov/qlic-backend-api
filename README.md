@@ -31,6 +31,10 @@ RESTful API of **Qlic** (startup WASD) — UPC 1ACC0238 Mobile Applications.
 
 The `authentication` and `terms-of-service` endpoints are public; every other endpoint requires the header `Authorization: Bearer <token>` (`401` without token). The token carries the account and the permission level of the session: a user invited with `VIEWER` permission gets `403` on `POST`, `PUT`, `PATCH` and `DELETE` over devices, alerts, consumption, incidents and subscriptions (US08). To work on an account shared with you, send its `accountId` in the sign-in request. Every registered reading is evaluated automatically against the threshold of its Water Point (US15): two consecutive readings above it within 30 minutes raise or escalate a leak alert and send the push notification. A device that stops reporting for 60 minutes becomes `OFFLINE` and the account receives a push. IAM messages are in English by default; send `Accept-Language: es-419` to receive them in Latin American Spanish.
 
+## Integration with the mobile applications
+
+The guide for the Android (Kotlin) and Flutter teams is in [`docs/frontend-integration.md`](docs/frontend-integration.md): session flows, user types and permissions, error format, push notification payloads, offline dashboard and the demonstration flow.
+
 ## Run locally
 
 ```bash
@@ -57,6 +61,7 @@ The `Dockerfile` builds the JAR with JDK 24 and runs it on JRE 24 using the `POR
 | `PASSWORD_RESET_EXPOSE_TOKEN` | `true` returns the reset token in the response while no email provider is configured |
 | `QLIC_SCHEDULING_ENABLED` | `false` turns off the meter simulator and the connectivity check (default `true`) |
 | `QLIC_SIMULATOR_INTERVAL_MS` | Interval between simulated readings (default 120000, 2 minutes) |
+| `QLIC_TIMEZONE` | Time zone of the dates without offset and of "today" in the dashboard and reports (default `America/Lima`) |
 
 Hibernate creates and updates the tables (`ddl-auto=update`). The Support data seeder loads the technicians and the terms of service the first time the application starts against an empty database.
 
