@@ -27,5 +27,6 @@ COPY --from=build /app/build/libs/*.jar app.jar
 # Exponer el puerto
 EXPOSE 8080
 
-# Iniciar la aplicación enlazando la variable dinámica $PORT de Render
-ENTRYPOINT ["sh", "-c", "java -Dserver.port=${PORT:-8080} -jar app.jar"]
+# Iniciar la aplicación enlazando la variable dinámica $PORT de Render. La zona horaria define el "hoy" del
+# dashboard y de los reportes; por defecto es la de Lima (se cambia con QLIC_TIMEZONE)
+ENTRYPOINT ["sh", "-c", "java -Duser.timezone=${QLIC_TIMEZONE:-America/Lima} -Dserver.port=${PORT:-8080} -jar app.jar"]
