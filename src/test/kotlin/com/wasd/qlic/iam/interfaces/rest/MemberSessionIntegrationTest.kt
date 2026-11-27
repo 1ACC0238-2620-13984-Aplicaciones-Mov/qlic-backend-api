@@ -56,6 +56,9 @@ class MemberSessionIntegrationTest {
         signUp("Diego Salas", "it.member.viewer@example.com")
         mockMvc.perform(post("/api/v1/subscriptions/trial").header("Authorization", "Bearer $ownerToken"))
             .andExpect(status().isCreated)
+        mockMvc.perform(post("/api/v1/subscriptions/trial").header("Authorization", "Bearer $ownerToken"))
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("subscriptions.trial.already-used"))
 
         val invitation = mockMvc.perform(
             post("/api/v1/invitations").header("Authorization", "Bearer $ownerToken").contentType(MediaType.APPLICATION_JSON)
@@ -101,5 +104,17 @@ class MemberSessionIntegrationTest {
         mockMvc.perform(
             post("/api/v1/accounts/$ownerAccountId/sessions").header("Authorization", "Bearer $outsiderToken")
         ).andExpect(status().isForbidden)
+    }
+
+    @Test
+    @DisplayName("Requests without a token or with an invalid one get 401 in Problem Details format")
+    fun unauthenticatedRequestsGetProblemDetails() {
+        mockMvc.perform(get("/api/v1/devices"))
+            .andExpect(status().isUnauthorized)
+            .andExpect(jsonPath("$.status").value(401))
+            .andExpect(jsonPath("$.code").value("iam.token.required"))
+        mockMvc.perform(get("/api/v1/devices").header("Authorization", "Bearer not-a-valid-token"))
+            .andExpect(status().isUnauthorized)
+            .andExpect(jsonPath("$.code").value("iam.token.invalid"))
     }
 }

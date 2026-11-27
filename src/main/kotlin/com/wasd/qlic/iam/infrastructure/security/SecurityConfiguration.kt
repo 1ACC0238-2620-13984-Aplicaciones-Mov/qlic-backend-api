@@ -36,7 +36,8 @@ import javax.crypto.spec.SecretKeySpec
 @EnableWebSecurity
 class SecurityConfiguration(
     @Value("\${qlic.security.jwt.secret}") private val jwtSecret: String,
-    private val accessDeniedHandler: ProblemDetailAccessDeniedHandler
+    private val accessDeniedHandler: ProblemDetailAccessDeniedHandler,
+    private val authenticationEntryPoint: ProblemDetailAuthenticationEntryPoint
 ) {
 
     @Bean
@@ -55,10 +56,14 @@ class SecurityConfiguration(
                 }
                 auth.anyRequest().authenticated()
             }
-            .exceptionHandling { it.accessDeniedHandler(accessDeniedHandler) }
+            .exceptionHandling {
+                it.accessDeniedHandler(accessDeniedHandler)
+                it.authenticationEntryPoint(authenticationEntryPoint)
+            }
             .oauth2ResourceServer {
                 it.jwt(Customizer.withDefaults())
                 it.accessDeniedHandler(accessDeniedHandler)
+                it.authenticationEntryPoint(authenticationEntryPoint)
             }
         return http.build()
     }

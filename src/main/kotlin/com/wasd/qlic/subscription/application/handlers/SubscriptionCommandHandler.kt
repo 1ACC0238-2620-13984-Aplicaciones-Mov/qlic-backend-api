@@ -1,6 +1,7 @@
 package com.wasd.qlic.subscriptions.application.handlers
 
 import com.wasd.qlic.subscriptions.domain.exceptions.SubscriptionNotFoundException
+import com.wasd.qlic.subscriptions.domain.exceptions.TrialAlreadyUsedException
 import com.wasd.qlic.subscriptions.domain.model.*
 import com.wasd.qlic.subscriptions.domain.repositories.*
 import org.springframework.stereotype.Service
@@ -101,7 +102,7 @@ class SubscriptionCommandHandler(
     fun startFreeTrial(command: StartTrialCommand): Subscription {
         val existing = subscriptionRepository.findByAccountId(command.accountId)
         if (existing != null && existing.trialUsed) {
-            throw IllegalStateException("El periodo de prueba se otorga una única vez por suscriptor")
+            throw TrialAlreadyUsedException()
         }
 
         val now = LocalDateTime.now()
