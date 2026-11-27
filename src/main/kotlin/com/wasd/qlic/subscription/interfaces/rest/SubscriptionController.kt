@@ -97,6 +97,7 @@ class SubscriptionController(
             "confirmed and 402 when it is rejected (use simulatePaymentRejected=true to test it); in that case " +
             "the subscription is not activated. The plans are listed in GET /api/v1/plans."
     )
+    @ResponseStatus(HttpStatus.CREATED)
     fun purchaseSubscription(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @RequestBody req: PurchaseSubscriptionRequest
@@ -129,6 +130,7 @@ class SubscriptionController(
         description = "Starts the 14-day TRIAL plan, which enables up to 2 Water Points. The trial is granted only once per " +
             "subscriber; a second request returns 409."
     )
+    @ResponseStatus(HttpStatus.CREATED)
     fun startFreeTrial(@Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt): ResponseEntity<Any> {
         return try {
             val sub = handler.startFreeTrial(StartTrialCommand(jwt.accountId()))
