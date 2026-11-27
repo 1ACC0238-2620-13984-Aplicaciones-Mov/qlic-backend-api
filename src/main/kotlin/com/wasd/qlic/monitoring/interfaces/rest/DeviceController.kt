@@ -1,6 +1,7 @@
 package com.wasd.qlic.monitoring.interfaces.rest
 
 import com.wasd.qlic.monitoring.application.commands.AssignWaterPointCommand
+import com.wasd.qlic.monitoring.application.commands.ConfigureDeviceSimulationCommand
 import com.wasd.qlic.monitoring.application.commands.DeleteDeviceCommand
 import com.wasd.qlic.monitoring.application.commands.RegisterDeviceCommand
 import com.wasd.qlic.monitoring.application.commands.UpdateDeviceCommand
@@ -8,6 +9,7 @@ import com.wasd.qlic.monitoring.application.handlers.DeviceCommandHandler
 import com.wasd.qlic.monitoring.application.queries.GetDeviceByIdQuery
 import com.wasd.qlic.monitoring.application.queries.GetDevicesByAccountQuery
 import com.wasd.qlic.monitoring.interfaces.rest.resources.AssignWaterPointRequest
+import com.wasd.qlic.monitoring.interfaces.rest.resources.DeviceSimulationRequest
 import com.wasd.qlic.monitoring.interfaces.rest.resources.IoTDeviceResource
 import com.wasd.qlic.monitoring.interfaces.rest.resources.RegisterDeviceRequest
 import com.wasd.qlic.monitoring.interfaces.rest.resources.UpdateDeviceRequest
@@ -15,8 +17,13 @@ import com.wasd.qlic.monitoring.interfaces.rest.resources.toResource
 import com.wasd.qlic.shared.interfaces.rest.security.accountId
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
+import io.swagger.v3.oas.annotations.media.Content
+import io.swagger.v3.oas.annotations.media.Schema
+import io.swagger.v3.oas.annotations.responses.ApiResponse
+import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.http.HttpStatus
+import org.springframework.http.ProblemDetail
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.security.oauth2.jwt.Jwt
@@ -38,6 +45,7 @@ class DeviceController(
             "100% battery. Registering the same serial number again in the same account returns the existing " +
             "device; a serial number registered in another account returns 409."
     )
+    @ResponseStatus(HttpStatus.CREATED)
     fun registerDevice(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @RequestBody request: RegisterDeviceRequest
@@ -69,6 +77,34 @@ class DeviceController(
         )
         return ResponseEntity.ok(updated.toResource())
     }
+
+    @PutMapping("/{id}/simulation")
+    @Operation(
+        summary = "Turn the simulation mode of a device on or off",
+        description = "For demonstrations and user validation without a physical meter. While enabled, the API registers a " +
+            "reading for the device every few minutes (qlic.simulator.interval-ms): NORMAL follows a daily usage profile and " +
+            "LEAK adds a continuous flow above the threshold, so the automatic leak detection raises an alert and sends the " +
+            "push notification after two readings. The device must be assigned to a Water Point (409 otherwise)."
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Simulation mode updated"),
+        ApiResponse(
+            responseCode = "409", description = "The device is not assigned to a Water Point",
+            content = [Content(schema = Schema(implementation = ProblemDetail::class))]
+        )
+    )
+    fun configureSimulation(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
+        @PathVariable id: UUID,
+        @RequestBody request: DeviceSimulationRequest
+    ): ResponseEntity<IoTDeviceResource> =
+        ResponseEntity.ok(
+            deviceCommandHandler.handleSimulation(
+                ConfigureDeviceSimulationCommand(
+                    deviceId = id, accountId = jwt.accountId(), enabled = request.enabled, scenario = request.scenario
+                )
+            ).toResource()
+        )
 
     @GetMapping
     @Operation(

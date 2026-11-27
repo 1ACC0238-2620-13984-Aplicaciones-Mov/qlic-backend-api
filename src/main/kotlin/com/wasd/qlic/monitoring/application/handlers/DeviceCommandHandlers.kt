@@ -1,6 +1,7 @@
 package com.wasd.qlic.monitoring.application.handlers
 
 import com.wasd.qlic.monitoring.application.commands.AssignWaterPointCommand
+import com.wasd.qlic.monitoring.application.commands.ConfigureDeviceSimulationCommand
 import com.wasd.qlic.monitoring.application.commands.DeleteDeviceCommand
 import com.wasd.qlic.monitoring.application.commands.RegisterDeviceCommand
 import com.wasd.qlic.monitoring.application.commands.UpdateDeviceCommand
@@ -8,6 +9,7 @@ import com.wasd.qlic.monitoring.application.queries.GetDeviceByIdQuery
 import com.wasd.qlic.monitoring.application.queries.GetDevicesByAccountQuery
 import com.wasd.qlic.monitoring.domain.exceptions.DeviceAlreadyRegisteredException
 import com.wasd.qlic.monitoring.domain.exceptions.DeviceNotFoundException
+import com.wasd.qlic.monitoring.domain.exceptions.DeviceWithoutWaterPointException
 import com.wasd.qlic.monitoring.domain.exceptions.WaterPointNotFoundException
 import com.wasd.qlic.monitoring.domain.model.IoTDevice
 import com.wasd.qlic.monitoring.domain.repositories.IoTDeviceRepository
@@ -71,6 +73,19 @@ class DeviceCommandHandler(
             waterPointRepository.findById(waterPointId)?.takeIf { it.accountId == command.accountId }
                 ?: throw WaterPointNotFoundException()
             device.assignWaterPoint(waterPointId)
+        }
+        return deviceRepository.save(device)
+    }
+
+    /** Turns the simulation mode of a device on or off; simulating requires an assigned Water Point. */
+    @Transactional
+    fun handleSimulation(command: ConfigureDeviceSimulationCommand): IoTDevice {
+        val device = ownedDevice(command.deviceId, command.accountId)
+        if (command.enabled) {
+            if (device.waterPointId == null) throw DeviceWithoutWaterPointException()
+            device.startSimulation(command.scenario)
+        } else {
+            device.stopSimulation()
         }
         return deviceRepository.save(device)
     }

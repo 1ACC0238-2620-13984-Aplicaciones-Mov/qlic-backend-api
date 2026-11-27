@@ -1,6 +1,8 @@
 package com.wasd.qlic.notifications.application
 
 import com.wasd.qlic.alerting.domain.model.LeakAlertRaisedEvent
+import com.wasd.qlic.monitoring.domain.model.DeviceDisconnectedEvent
+import com.wasd.qlic.monitoring.domain.model.IoTDevice
 import com.wasd.qlic.monitoring.domain.model.TankLevelLowEvent
 import com.wasd.qlic.notifications.domain.model.NotificationCategory
 import com.wasd.qlic.notifications.domain.model.PushMessage
@@ -54,6 +56,20 @@ class NotificationEventListeners(
                 ),
                 category = NotificationCategory.TANK_LEVEL_LOW,
                 data = mapOf("tankId" to event.tankId.toString(), "levelPercentage" to plain(event.levelPercentage))
+            )
+        )
+    }
+
+    /** A meter stopped reporting: while it is silent, a leak would go unnoticed. */
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    fun onDeviceDisconnected(event: DeviceDisconnectedEvent) = notify {
+        pushService.sendToAccount(
+            event.accountId,
+            PushMessage(
+                title = message("push.device-offline.title", event.deviceName),
+                body = message("push.device-offline.body", event.deviceName, IoTDevice.DISCONNECTION_LIMIT_MINUTES),
+                category = NotificationCategory.DEVICE_OFFLINE,
+                data = mapOf("deviceId" to event.deviceId.toString())
             )
         )
     }

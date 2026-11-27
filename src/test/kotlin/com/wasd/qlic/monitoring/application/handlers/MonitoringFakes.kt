@@ -1,6 +1,7 @@
 package com.wasd.qlic.monitoring.application.handlers
 
 import com.wasd.qlic.monitoring.domain.model.ConsumptionReading
+import com.wasd.qlic.monitoring.domain.model.DeviceStatus
 import com.wasd.qlic.monitoring.domain.model.IoTDevice
 import com.wasd.qlic.monitoring.domain.model.Location
 import com.wasd.qlic.monitoring.domain.model.TankLevelReading
@@ -34,6 +35,11 @@ class InMemoryIoTDeviceRepository : IoTDeviceRepository {
 
     override fun existsByWaterPointId(waterPointId: UUID): Boolean =
         storage.values.any { it.waterPointId == waterPointId }
+
+    override fun findSimulated(): List<IoTDevice> = storage.values.filter { it.simulated }
+
+    override fun findConnectedNotSyncedSince(limit: LocalDateTime): List<IoTDevice> =
+        storage.values.filter { it.status != DeviceStatus.OFFLINE && it.lastSyncAt.isBefore(limit) }
 
     override fun delete(device: IoTDevice) {
         storage.remove(device.id)
@@ -94,6 +100,9 @@ class InMemoryConsumptionReadingRepository : ConsumptionReadingRepository {
         storage.add(reading)
         return reading
     }
+
+    override fun findLatestByWaterPointIdBefore(waterPointId: UUID, before: LocalDateTime): ConsumptionReading? =
+        storage.filter { it.waterPointId == waterPointId && it.recordedAt.isBefore(before) }.maxByOrNull { it.recordedAt }
 
     override fun findByAccountIdBetween(accountId: UUID, from: LocalDateTime, to: LocalDateTime): List<ConsumptionReading> =
         storage.filter { it.accountId == accountId && !it.recordedAt.isBefore(from) && !it.recordedAt.isAfter(to) }

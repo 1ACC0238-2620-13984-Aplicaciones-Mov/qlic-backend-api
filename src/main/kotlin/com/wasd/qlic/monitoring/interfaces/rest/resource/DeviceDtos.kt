@@ -2,6 +2,7 @@ package com.wasd.qlic.monitoring.interfaces.rest.resources
 
 import com.wasd.qlic.monitoring.domain.model.DeviceStatus
 import com.wasd.qlic.monitoring.domain.model.IoTDevice
+import com.wasd.qlic.monitoring.domain.model.SimulationScenario
 import io.swagger.v3.oas.annotations.media.Schema
 import java.time.LocalDateTime
 import java.util.UUID
@@ -35,7 +36,17 @@ data class IoTDeviceResource(
     val waterPointId: UUID?,
     val status: DeviceStatus,
     val batteryPercentage: Int,
-    val lastSyncAt: LocalDateTime
+    val lastSyncAt: LocalDateTime,
+    @field:Schema(description = "Scenario of the simulation mode; null when the device sends real readings", example = "LEAK", nullable = true)
+    val simulationScenario: SimulationScenario?
+)
+
+/** Simulation mode of a device, for demonstrations and user validation without a physical meter. */
+data class DeviceSimulationRequest(
+    @field:Schema(description = "true starts sending simulated readings; false stops them", example = "true")
+    val enabled: Boolean,
+    @field:Schema(description = "NORMAL follows a daily usage profile; LEAK adds a continuous flow above the threshold", example = "LEAK")
+    val scenario: SimulationScenario = SimulationScenario.NORMAL
 )
 
 fun IoTDevice.toResource() = IoTDeviceResource(
@@ -47,5 +58,6 @@ fun IoTDevice.toResource() = IoTDeviceResource(
     waterPointId = waterPointId,
     status = effectiveStatus(),
     batteryPercentage = batteryPercentage,
-    lastSyncAt = lastSyncAt
+    lastSyncAt = lastSyncAt,
+    simulationScenario = simulationScenario
 )

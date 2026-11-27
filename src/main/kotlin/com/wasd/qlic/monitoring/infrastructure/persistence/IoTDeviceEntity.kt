@@ -1,6 +1,7 @@
 package com.wasd.qlic.monitoring.infrastructure.persistence
 
 import com.wasd.qlic.monitoring.domain.model.DeviceStatus
+import com.wasd.qlic.monitoring.domain.model.SimulationScenario
 import jakarta.persistence.*
 import java.time.LocalDateTime
 import java.util.UUID
@@ -37,5 +38,9 @@ class IoTDeviceEntity(
     var batteryPercentage: Int,
 
     @Column(name = "last_sync_at", nullable = false)
-    var lastSyncAt: LocalDateTime
+    var lastSyncAt: LocalDateTime,
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "simulation_scenario", length = 20)
+    var simulationScenario: SimulationScenario? = null
 )
