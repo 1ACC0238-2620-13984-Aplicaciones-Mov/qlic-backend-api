@@ -37,6 +37,7 @@ import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -126,6 +127,7 @@ class WaterTankController(
         description = "Creates a tank in a location of the account with its capacity in liters and its critical level (20% " +
             "by default). Optionally links the device that reports its level."
     )
+    @ResponseStatus(HttpStatus.CREATED)
     fun create(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @Valid @RequestBody resource: SaveWaterTankResource
@@ -199,6 +201,7 @@ class WaterTankController(
         description = "When the level falls below the critical value, TankLevelLowEvent is published once and a push " +
             "notification is sent to the subscriber; the alert is rearmed when the tank is refilled."
     )
+    @ResponseStatus(HttpStatus.CREATED)
     fun registerLevel(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @PathVariable tankId: UUID,

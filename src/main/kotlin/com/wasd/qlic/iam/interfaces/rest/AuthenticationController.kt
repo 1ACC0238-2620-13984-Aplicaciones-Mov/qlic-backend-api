@@ -2,12 +2,15 @@ package com.wasd.qlic.iam.interfaces.rest
 
 import com.wasd.qlic.iam.application.commands.AuthenticateCommand
 import com.wasd.qlic.iam.application.commands.RegisterAccountCommand
+import com.wasd.qlic.iam.application.handlers.AccountQueryHandler
 import com.wasd.qlic.iam.application.handlers.AuthenticateCommandHandler
 import com.wasd.qlic.iam.application.handlers.RegisterAccountCommandHandler
+import com.wasd.qlic.iam.application.queries.GetSharedAccountsQuery
 import com.wasd.qlic.iam.interfaces.rest.resources.AccountResource
 import com.wasd.qlic.iam.interfaces.rest.resources.AuthenticationResource
 import com.wasd.qlic.iam.interfaces.rest.resources.SignInResource
 import com.wasd.qlic.iam.interfaces.rest.resources.SignUpResource
+import com.wasd.qlic.iam.interfaces.rest.resources.SharedAccountResource
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.media.Content
 import io.swagger.v3.oas.annotations.media.Schema
@@ -29,7 +32,8 @@ import org.springframework.web.bind.annotation.RestController
 @Tag(name = "Authentication", description = "IAM - Subscriber sign-up and sign-in (US05, US06, TS01)")
 class AuthenticationController(
     private val registerAccountCommandHandler: RegisterAccountCommandHandler,
-    private val authenticateCommandHandler: AuthenticateCommandHandler
+    private val authenticateCommandHandler: AuthenticateCommandHandler,
+    private val accountQueryHandler: AccountQueryHandler
 ) {
 
     @PostMapping("/sign-up")
@@ -77,7 +81,8 @@ class AuthenticationController(
     @Operation(
         summary = "Sign in to the mobile application (US06)",
         description = "Validates the credentials and issues a JWT access token with its expiration time (TS01). " +
-            "Send accountId to open the session over an account shared with you (US08)."
+            "Send accountId to open the session over an account shared with you (US08). The response lists the accounts " +
+            "shared with the subscriber in sharedAccounts."
     )
     @ApiResponses(
         ApiResponse(responseCode = "200", description = "Authenticated; returns the access token"),
@@ -107,7 +112,15 @@ class AuthenticationController(
                 token = session.accessToken.value,
                 tokenType = session.accessToken.type,
                 expiresAt = session.accessToken.expiresAt,
-                permission = session.permission.name
+                permission = session.permission.name,
+                sharedAccounts = accountQueryHandler.handle(GetSharedAccountsQuery(session.subscriber.id)).map {
+                    SharedAccountResource(
+                        accountId = it.account.id,
+                        accountName = it.account.name,
+                        permission = it.authorizedUser.permission.name,
+                        authorizedAt = it.authorizedUser.authorizedAt
+                    )
+                }
             )
         )
     }

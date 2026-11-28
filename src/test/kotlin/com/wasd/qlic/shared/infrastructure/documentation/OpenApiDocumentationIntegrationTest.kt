@@ -54,6 +54,8 @@ class OpenApiDocumentationIntegrationTest {
             JsonPath.read<String>(json, "$.paths['/api/v1/devices/{id}'].get.responses['404'].content['application/problem+json'].example.code")
         )
         assertTrue(JsonPath.read<Map<String, Any>>(json, "$.paths['/api/v1/devices'].post.responses").containsKey("401"))
+        assertTrue(JsonPath.read<Map<String, Any>>(json, "$.paths['/api/v1/devices'].post.responses").containsKey("201"))
+        assertTrue(JsonPath.read<Map<String, Any>>(json, "$.paths['/api/v1/consumption-readings'].post.responses").containsKey("201"))
         assertTrue(JsonPath.read<Map<String, Any>>(json, "$.paths['/api/v1/devices/{id}'].put.responses").containsKey("403"))
         assertTrue(!JsonPath.read<Map<String, Any>>(json, "$.paths['/api/v1/plans'].get.responses").containsKey("401"))
     }

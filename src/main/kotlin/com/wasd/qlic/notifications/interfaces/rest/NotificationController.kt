@@ -27,6 +27,7 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import java.time.Instant
 import java.util.UUID
@@ -78,6 +79,7 @@ class NotificationController(
         description = "Call it after sign-in and whenever Firebase renews the token. Registering an existing token moves it to " +
             "this account and reactivates it."
     )
+    @ResponseStatus(HttpStatus.CREATED)
     fun registerToken(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @Valid @RequestBody resource: RegisterDeviceTokenResource

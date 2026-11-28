@@ -97,6 +97,7 @@ class SubscriptionController(
             "confirmed and 402 when it is rejected (use simulatePaymentRejected=true to test it); in that case " +
             "the subscription is not activated. The plans are listed in GET /api/v1/plans."
     )
+    @ResponseStatus(HttpStatus.CREATED)
     fun purchaseSubscription(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @RequestBody req: PurchaseSubscriptionRequest
@@ -127,15 +128,12 @@ class SubscriptionController(
     @Operation(
         summary = "Start the free trial, once per subscriber (US32)",
         description = "Starts the 14-day TRIAL plan, which enables up to 2 Water Points. The trial is granted only once per " +
-            "subscriber; a second request returns 409."
+            "subscriber; a second request returns 409 with the code subscriptions.trial.already-used."
     )
-    fun startFreeTrial(@Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt): ResponseEntity<Any> {
-        return try {
-            val sub = handler.startFreeTrial(StartTrialCommand(jwt.accountId()))
-            ResponseEntity.status(HttpStatus.CREATED).body(sub.toResource())
-        } catch (ex: IllegalStateException) {
-            ResponseEntity.status(HttpStatus.CONFLICT).body(mapOf("error" to ex.message))
-        }
+    @ResponseStatus(HttpStatus.CREATED)
+    fun startFreeTrial(@Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt): ResponseEntity<SubscriptionResource> {
+        val sub = handler.startFreeTrial(StartTrialCommand(jwt.accountId()))
+        return ResponseEntity.status(HttpStatus.CREATED).body(sub.toResource())
     }
 
     @GetMapping("/current")

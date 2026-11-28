@@ -2,27 +2,27 @@ package com.wasd.qlic.alerting.interfaces.rest
 
 import com.wasd.qlic.alerting.application.commands.*
 import com.wasd.qlic.alerting.application.handlers.AlertManagementCommandHandler
-import com.wasd.qlic.alerting.application.handlers.EvaluateConsumptionReadingCommandHandler
 import com.wasd.qlic.alerting.application.handlers.GetAlertsByAccountQueryHandler
 import com.wasd.qlic.alerting.application.queries.GetAlertsByAccountQuery
+import com.wasd.qlic.alerting.application.services.LeakDetectionService
 import com.wasd.qlic.alerting.domain.exceptions.AlertNotFoundException
 import com.wasd.qlic.alerting.domain.model.AuthorizedAlertRecipient
 import com.wasd.qlic.alerting.domain.model.ConsumptionThreshold
 import com.wasd.qlic.alerting.domain.model.LeakAlert
-import com.wasd.qlic.alerting.domain.model.LeakAlertRaisedEvent
 import com.wasd.qlic.alerting.domain.model.NotificationPreference
 import com.wasd.qlic.alerting.interfaces.rest.resources.*
 import com.wasd.qlic.shared.interfaces.rest.security.accountId
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
+import io.swagger.v3.oas.annotations.media.Content
+import io.swagger.v3.oas.annotations.responses.ApiResponse
+import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.tags.Tag
-import org.springframework.context.ApplicationEventPublisher
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.web.bind.annotation.*
-import java.math.BigDecimal
 import java.util.UUID
 
 /** Alerting endpoints. Every operation works on the account of the access token. */
@@ -30,10 +30,9 @@ import java.util.UUID
 @RequestMapping("/api/v1/alerts")
 @Tag(name = "Alerts", description = "Leak alerts, thresholds, notification preferences and recipients")
 class LeakAlertController(
-    private val evaluateHandler: EvaluateConsumptionReadingCommandHandler,
+    private val leakDetectionService: LeakDetectionService,
     private val getAlertsHandler: GetAlertsByAccountQueryHandler,
-    private val managementHandler: AlertManagementCommandHandler,
-    private val eventPublisher: ApplicationEventPublisher
+    private val managementHandler: AlertManagementCommandHandler
 ) {
 
     @PostMapping("/evaluations")
@@ -44,43 +43,27 @@ class LeakAlertController(
             "the alert); otherwise it answers 204 without body. When the urgency reaches the minimum configured, " +
             "the alert is notified to the enabled recipients and by push."
     )
+    @ApiResponses(
+        ApiResponse(responseCode = "201", description = "A leak alert was raised or escalated"),
+        ApiResponse(responseCode = "204", description = "The flow is within the threshold or not sustained; no alert", content = [Content()])
+    )
     fun evaluateReading(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @RequestBody request: EvaluateReadingRequest
     ): ResponseEntity<LeakAlertResource> {
-        val accountId = jwt.accountId()
-        val effectiveLimit = request.thresholdLimit ?: managementHandler
-            .getThresholdsByAccount(accountId)
-            .find { it.waterPointId == request.waterPointId }
-            ?.effectiveLimit()
-        ?: DEFAULT_LIMIT_LITERS_PER_HOUR
-
-        val result = evaluateHandler.handle(
-            EvaluateConsumptionReadingCommand(
-                accountId = accountId,
-                waterPointId = request.waterPointId,
-                currentFlowLitersPerHour = request.currentFlowLitersPerHour,
-                thresholdLimit = effectiveLimit,
-                isSustained = request.isSustained
-            )
+        val outcome = leakDetectionService.evaluate(
+            accountId = jwt.accountId(),
+            waterPointId = request.waterPointId,
+            flowLitersPerHour = request.currentFlowLitersPerHour,
+            sustained = request.isSustained,
+            thresholdLimit = request.thresholdLimit
         ) ?: return ResponseEntity.noContent().build()
-
-        val pushDispatched = managementHandler.getNotificationPreference(accountId).shouldSendPush(result.urgency)
-        val notifiedUsers = if (pushDispatched) managementHandler.dispatchPushToAuthorizedUsers(accountId) else emptyList()
-        if (pushDispatched) {
-            eventPublisher.publishEvent(
-                LeakAlertRaisedEvent(
-                    accountId = accountId,
-                    alertId = result.id,
-                    waterPointId = result.waterPointId,
-                    urgency = result.urgency.name,
-                    estimatedVolumeLiters = result.estimatedVolumeLiters,
-                    recipientPushTokens = notifiedUsers.map { it.devicePushToken }
-                )
+        return ResponseEntity.status(HttpStatus.CREATED).body(
+            outcome.alert.toResource(
+                pushDispatched = outcome.pushDispatched,
+                notifiedRecipientsCount = outcome.notifiedRecipientsCount
             )
-        }
-        return ResponseEntity.status(HttpStatus.CREATED)
-            .body(result.toResource(pushDispatched = pushDispatched, notifiedRecipientsCount = notifiedUsers.size))
+        )
     }
 
     @GetMapping
@@ -179,6 +162,7 @@ class LeakAlertController(
         description = "Registers a person, with name, e-mail and push token of their device, who also receives the alerts " +
             "of the account."
     )
+    @ResponseStatus(HttpStatus.CREATED)
     fun addAuthorizedRecipient(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @RequestBody req: AddAuthorizedRecipientRequest
@@ -282,8 +266,4 @@ class LeakAlertController(
         enabled = enabled,
         lastNotifiedAt = lastNotifiedAt
     )
-
-    private companion object {
-        val DEFAULT_LIMIT_LITERS_PER_HOUR = BigDecimal("125.00")
-    }
 }

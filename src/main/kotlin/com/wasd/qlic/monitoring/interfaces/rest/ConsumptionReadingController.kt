@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -82,6 +83,7 @@ class ConsumptionReadingController(
         summary = "Register a consumption reading of a device",
         description = "The reading is stored under the Water Point currently assigned to the device. It feeds the consumption reports (US24)."
     )
+    @ResponseStatus(HttpStatus.CREATED)
     fun register(
         @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
         @Valid @RequestBody resource: RegisterConsumptionReadingResource

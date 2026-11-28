@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "com.wasd.qlic"
-version = "1.4.0"
+version = "1.5.0"
 
 java {
 	toolchain {
@@ -36,6 +36,7 @@ dependencies {
 	testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
 	testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
 	testImplementation("org.springframework.security:spring-security-test")
+	testImplementation("io.cucumber:cucumber-java:7.20.1")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
@@ -53,4 +54,6 @@ allOpen {
 
 tasks.withType<Test> {
 	useJUnitPlatform()
+	// The periodic jobs (meter simulator, connectivity check) are exercised on demand by the tests
+	systemProperty("qlic.scheduling.enabled", "false")
 }

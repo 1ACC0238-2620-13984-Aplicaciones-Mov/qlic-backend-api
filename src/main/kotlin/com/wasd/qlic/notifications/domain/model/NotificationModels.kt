@@ -6,7 +6,7 @@ import java.util.UUID
 enum class DevicePlatform { ANDROID, IOS, WEB }
 
 /** Reason of a push notification, used by the app to open the right screen. */
-enum class NotificationCategory { LEAK_ALERT, TANK_LEVEL_LOW, TEST }
+enum class NotificationCategory { LEAK_ALERT, TANK_LEVEL_LOW, DEVICE_OFFLINE, TEST }
 
 /** Result of a delivery attempt reported by the push provider (TS06). */
 enum class PushDeliveryStatus {

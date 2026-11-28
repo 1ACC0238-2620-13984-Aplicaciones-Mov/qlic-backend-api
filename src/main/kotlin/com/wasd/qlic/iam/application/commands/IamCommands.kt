@@ -56,3 +56,6 @@ data class UpdateProfileCommand(
     val phone: String?,
     val accountName: String?
 )
+
+/** US08: open a session over an account the signed-in subscriber can access (own or shared). */
+data class SwitchAccountCommand(val subscriberId: UUID, val accountId: UUID)

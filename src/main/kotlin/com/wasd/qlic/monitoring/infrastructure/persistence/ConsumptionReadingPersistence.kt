@@ -17,7 +17,10 @@ import java.util.UUID
 @Entity
 @Table(
     name = "consumption_readings",
-    indexes = [Index(name = "idx_readings_account_recorded", columnList = "account_id, recorded_at")]
+    indexes = [
+        Index(name = "idx_readings_account_recorded", columnList = "account_id, recorded_at"),
+        Index(name = "idx_readings_water_point_recorded", columnList = "water_point_id, recorded_at")
+    ]
 )
 class ConsumptionReadingEntity(
     @Id val id: UUID,
@@ -32,6 +35,9 @@ class ConsumptionReadingEntity(
 
 @Repository
 interface SpringDataConsumptionReadingRepository : JpaRepository<ConsumptionReadingEntity, UUID> {
+    fun findFirstByWaterPointIdAndRecordedAtBeforeOrderByRecordedAtDesc(
+        waterPointId: UUID, before: LocalDateTime
+    ): ConsumptionReadingEntity?
     fun findAllByAccountIdAndRecordedAtBetween(accountId: UUID, from: LocalDateTime, to: LocalDateTime): List<ConsumptionReadingEntity>
 }
 
@@ -48,6 +54,9 @@ class JpaConsumptionReadingRepositoryImpl(
             )
         )
     )
+
+    override fun findLatestByWaterPointIdBefore(waterPointId: UUID, before: LocalDateTime): ConsumptionReading? =
+        jpa.findFirstByWaterPointIdAndRecordedAtBeforeOrderByRecordedAtDesc(waterPointId, before)?.let { toDomain(it) }
 
     override fun findByAccountIdBetween(accountId: UUID, from: LocalDateTime, to: LocalDateTime): List<ConsumptionReading> =
         jpa.findAllByAccountIdAndRecordedAtBetween(accountId, from, to).map { toDomain(it) }

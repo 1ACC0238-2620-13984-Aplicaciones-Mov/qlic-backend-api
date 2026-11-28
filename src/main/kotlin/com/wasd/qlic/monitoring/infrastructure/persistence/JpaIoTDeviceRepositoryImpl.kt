@@ -1,8 +1,10 @@
 package com.wasd.qlic.monitoring.infrastructure.persistence
 
+import com.wasd.qlic.monitoring.domain.model.DeviceStatus
 import com.wasd.qlic.monitoring.domain.model.IoTDevice
 import com.wasd.qlic.monitoring.domain.repositories.IoTDeviceRepository
 import org.springframework.stereotype.Component
+import java.time.LocalDateTime
 import java.util.UUID
 
 @Component
@@ -21,7 +23,8 @@ class JpaIoTDeviceRepositoryImpl(
             waterPointId = device.waterPointId,
             status = device.status,
             batteryPercentage = device.batteryPercentage,
-            lastSyncAt = device.lastSyncAt
+            lastSyncAt = device.lastSyncAt,
+            simulationScenario = device.simulationScenario
         )
         val saved = jpaRepository.save(entity)
         return toDomain(saved)
@@ -42,6 +45,12 @@ class JpaIoTDeviceRepositoryImpl(
     override fun existsByWaterPointId(waterPointId: UUID): Boolean =
         jpaRepository.existsByWaterPointId(waterPointId)
 
+    override fun findSimulated(): List<IoTDevice> =
+        jpaRepository.findBySimulationScenarioIsNotNull().map { toDomain(it) }
+
+    override fun findConnectedNotSyncedSince(limit: LocalDateTime): List<IoTDevice> =
+        jpaRepository.findByStatusNotAndLastSyncAtBefore(DeviceStatus.OFFLINE, limit).map { toDomain(it) }
+
     override fun delete(device: IoTDevice) = jpaRepository.deleteById(device.id)
 
     private fun toDomain(entity: IoTDeviceEntity): IoTDevice {
@@ -55,7 +64,8 @@ class JpaIoTDeviceRepositoryImpl(
             waterPointId = entity.waterPointId,
             status = entity.status,
             batteryPercentage = entity.batteryPercentage,
-            lastSyncAt = entity.lastSyncAt
+            lastSyncAt = entity.lastSyncAt,
+            simulationScenario = entity.simulationScenario
         )
     }
 }
