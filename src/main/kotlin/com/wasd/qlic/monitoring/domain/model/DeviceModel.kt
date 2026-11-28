@@ -10,6 +10,15 @@ enum class DeviceStatus {
     CALIBRATING
 }
 
+/**
+ * Behaviour of a device in simulation mode, used for demonstrations and user validation without a physical meter:
+ * NORMAL follows a daily usage profile and LEAK adds a continuous flow above any usual threshold.
+ */
+enum class SimulationScenario {
+    NORMAL,
+    LEAK
+}
+
 class IoTDevice(
     val id: UUID = UUID.randomUUID(),
     val serialNumber: String,
@@ -20,8 +29,31 @@ class IoTDevice(
     var waterPointId: UUID? = null,
     var status: DeviceStatus = DeviceStatus.ONLINE,
     var batteryPercentage: Int = 100,
-    var lastSyncAt: LocalDateTime = LocalDateTime.now()
+    var lastSyncAt: LocalDateTime = LocalDateTime.now(),
+    var simulationScenario: SimulationScenario? = null
 ) {
+    val simulated: Boolean get() = simulationScenario != null
+
+    /** The device starts sending simulated readings with the given scenario. */
+    fun startSimulation(scenario: SimulationScenario) {
+        this.simulationScenario = scenario
+    }
+
+    /** The device stops sending simulated readings. */
+    fun stopSimulation() {
+        this.simulationScenario = null
+    }
+
+    /**
+     * DeviceHealthService rule: a device that has not reported within the limit becomes OFFLINE.
+     * Returns true only on the transition, so the disconnection is notified once.
+     */
+    fun markDisconnectedIfSilent(now: LocalDateTime = LocalDateTime.now()): Boolean {
+        if (status == DeviceStatus.OFFLINE || !lastSyncAt.isBefore(now.minusMinutes(DISCONNECTION_LIMIT_MINUTES))) return false
+        status = DeviceStatus.OFFLINE
+        return true
+    }
+
     fun assignWaterPoint(waterPointId: UUID) {
         this.waterPointId = waterPointId
     }
@@ -71,3 +103,14 @@ class IoTDevice(
         const val MAX_NAME_LENGTH = 60
     }
 }
+
+/**
+ * Domain Event: a device stopped reporting for longer than the disconnection limit (DeviceHealthService). Notifications
+ * warns the account, because a silent meter also means that a leak would go unnoticed.
+ */
+data class DeviceDisconnectedEvent(
+    val accountId: UUID,
+    val deviceId: UUID,
+    val deviceName: String,
+    val lastSyncAt: LocalDateTime
+)

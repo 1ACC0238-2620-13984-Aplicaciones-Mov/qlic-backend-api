@@ -74,5 +74,10 @@ data class AuthenticationResource(
     @field:Schema(example = "Bearer") val tokenType: String,
     val expiresAt: Instant,
     @field:Schema(description = "Permission level over the account of the session (US08)", example = "OWNER")
-    val permission: String
+    val permission: String,
+    @field:Schema(
+        description = "Accounts shared with the subscriber (US08). The member application opens a session over one of " +
+            "them with POST /api/v1/accounts/{accountId}/sessions."
+    )
+    val sharedAccounts: List<SharedAccountResource> = emptyList()
 )

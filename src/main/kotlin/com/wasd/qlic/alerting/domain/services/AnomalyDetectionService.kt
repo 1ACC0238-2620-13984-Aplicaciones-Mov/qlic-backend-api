@@ -7,6 +7,13 @@ import java.math.BigDecimal
 @Service
 class AnomalyDetectionService {
 
+    /**
+     * US15: a flow is sustained when the previous reading of the same Water Point, registered within the sustained
+     * window, was also above the threshold.
+     */
+    fun isSustained(previousFlowLitersPerHour: BigDecimal?, thresholdLimit: BigDecimal): Boolean =
+        previousFlowLitersPerHour != null && previousFlowLitersPerHour > thresholdLimit
+
     // Regla de contorno US15: solo lecturas sostenidas generan alerta
     fun evaluateReading(
         currentFlowLitersPerHour: BigDecimal,

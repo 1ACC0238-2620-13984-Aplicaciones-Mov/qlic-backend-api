@@ -1,6 +1,7 @@
 package com.wasd.qlic.subscriptions.application.handlers
 
 import com.wasd.qlic.subscriptions.domain.exceptions.SubscriptionNotFoundException
+import com.wasd.qlic.subscriptions.domain.exceptions.TrialAlreadyUsedException
 import com.wasd.qlic.subscriptions.domain.model.*
 import com.wasd.qlic.subscriptions.domain.repositories.*
 import org.junit.jupiter.api.Assertions.*
@@ -88,7 +89,7 @@ class SubscriptionCommandHandlerTest {
         assertTrue(trial.trialUsed)
         assertTrue(trial.hasPaidFeaturesAccess())
 
-        assertThrows(IllegalStateException::class.java) {
+        assertThrows(TrialAlreadyUsedException::class.java) {
             handler.startFreeTrial(StartTrialCommand(accountId))
         }
     }

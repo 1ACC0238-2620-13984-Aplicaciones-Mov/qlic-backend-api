@@ -1,5 +1,6 @@
 package com.wasd.qlic.monitoring.application.commands
 
+import com.wasd.qlic.monitoring.domain.model.SimulationScenario
 import java.util.UUID
 
 /** US10: registers an IoT device in the account of the session by reading its QR code. */
@@ -26,4 +27,15 @@ data class UpdateDeviceCommand(
     val accountId: UUID,
     val name: String?,
     val waterPointId: UUID?
+)
+
+/**
+ * Demonstration support: turns the simulation mode of a device of the account on (with a scenario) or off. A device
+ * must be assigned to a Water Point to simulate readings.
+ */
+data class ConfigureDeviceSimulationCommand(
+    val deviceId: UUID,
+    val accountId: UUID,
+    val enabled: Boolean,
+    val scenario: SimulationScenario
 )

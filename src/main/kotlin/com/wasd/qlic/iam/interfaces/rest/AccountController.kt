@@ -1,12 +1,15 @@
 package com.wasd.qlic.iam.interfaces.rest
 
+import com.wasd.qlic.iam.application.commands.SwitchAccountCommand
 import com.wasd.qlic.iam.application.commands.UpdateProfileCommand
 import com.wasd.qlic.iam.application.handlers.AccountQueryHandler
 import com.wasd.qlic.iam.application.handlers.Profile
+import com.wasd.qlic.iam.application.handlers.SwitchAccountCommandHandler
 import com.wasd.qlic.iam.application.handlers.UpdateProfileCommandHandler
 import com.wasd.qlic.iam.application.queries.GetProfileQuery
 import com.wasd.qlic.iam.application.queries.GetSharedAccountsQuery
 import com.wasd.qlic.iam.domain.model.valueobjects.PermissionLevel
+import com.wasd.qlic.iam.interfaces.rest.resources.AuthenticationResource
 import com.wasd.qlic.iam.interfaces.rest.resources.ProfileResource
 import com.wasd.qlic.iam.interfaces.rest.resources.SharedAccountResource
 import com.wasd.qlic.iam.interfaces.rest.resources.UpdateProfileResource
@@ -26,17 +29,21 @@ import org.springframework.http.ResponseEntity
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import java.util.UUID
 
 @RestController
 @RequestMapping("/api/v1/accounts")
 @Tag(name = "Accounts", description = "IAM - Profile of the subscriber and accounts shared with them (US08, US09)")
 class AccountController(
     private val accountQueryHandler: AccountQueryHandler,
-    private val updateProfileCommandHandler: UpdateProfileCommandHandler
+    private val updateProfileCommandHandler: UpdateProfileCommandHandler,
+    private val switchAccountCommandHandler: SwitchAccountCommandHandler
 ) {
 
     @GetMapping("/me")
@@ -99,6 +106,39 @@ class AccountController(
                 )
             }
         )
+
+    @PostMapping("/{accountId}/sessions")
+    @Operation(
+        summary = "Open a session over an account I can access (US08)",
+        description = "Issues a new access token over the given account without asking for the password again: OWNER for " +
+            "the subscriber's own account, or the permission of the invitation (VIEWER or OPERATOR) for an account shared " +
+            "with them. The member application calls it after sign-in with an item of sharedAccounts."
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Session opened; returns the new access token"),
+        ApiResponse(
+            responseCode = "403", description = "The account is not shared with the subscriber",
+            content = [Content(schema = Schema(implementation = ProblemDetail::class))]
+        )
+    )
+    fun openSession(
+        @Parameter(hidden = true) @AuthenticationPrincipal jwt: Jwt,
+        @PathVariable accountId: UUID
+    ): ResponseEntity<AuthenticationResource> {
+        val session = switchAccountCommandHandler.handle(SwitchAccountCommand(jwt.subscriberId(), accountId))
+        return ResponseEntity.ok(
+            AuthenticationResource(
+                subscriberId = session.subscriber.id,
+                accountId = session.account.id,
+                email = session.subscriber.email.value,
+                fullName = session.subscriber.fullName,
+                token = session.accessToken.value,
+                tokenType = session.accessToken.type,
+                expiresAt = session.accessToken.expiresAt,
+                permission = session.permission.name
+            )
+        )
+    }
 
     private fun Profile.toResource(permission: String) = ProfileResource(
         subscriberId = subscriber.id,
